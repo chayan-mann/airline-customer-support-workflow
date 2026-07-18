@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain.chat_models import init_chat_model
+from langgraph.checkpoint.memory import MemorySaver
 
 load_dotenv()
 
@@ -63,8 +64,8 @@ graph_builder.add_edge("tools", "chatbot")
 
 # graph_builder.add_edge("chatbot", END)
 
-graph = graph_builder.compile()
-
+memory = MemorySaver()
+graph = graph_builder.compile(checkpointer=memory)
 
 if __name__ == "__main__":
     # We ask a question that forces the LLM to use our tool
