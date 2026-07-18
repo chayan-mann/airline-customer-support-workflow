@@ -1,12 +1,42 @@
 """Terminal chat interface for the support agent graph."""
 
-from app.graph import graph
+from langchain_core.messages import ToolMessage
+
+from app.graph import TOOL_REJECTED_MESSAGE, graph
+
+
+def _pending_tool_calls(config: dict) -> list[dict]:
+    state = graph.get_state(config)
+    if "tools" not in state.next:
+        return []
+    return getattr(state.values["messages"][-1], "tool_calls", None) or []
+
+
+def _handle_approval(config: dict) -> None:
+    """If the graph is paused on a tool call, ask the human to approve/reject it."""
+    while True:
+        pending = _pending_tool_calls(config)
+        if not pending:
+            return
+
+        for tc in pending:
+            print(f"Agent wants to call tool: {tc['name']}({tc['args']})")
+        decision = input("Approve? [y/N]: ").strip().lower()
+
+        if decision in {"y", "yes"}:
+            graph.invoke(None, config)
+        else:
+            rejections = [
+                ToolMessage(content=TOOL_REJECTED_MESSAGE, tool_call_id=tc["id"])
+                for tc in pending
+            ]
+            graph.update_state(config, {"messages": rejections}, as_node="tools")
+            graph.invoke(None, config)
 
 
 def main() -> None:
     print("Customer Support Agent (type 'exit' or 'quit' to stop)")
     session_id = input("Session ID: ").strip() or "default"
-    messages = []
     config = {"configurable": {"thread_id": session_id}}
     while True:
         try:
@@ -20,10 +50,11 @@ def main() -> None:
         if user_input.lower() in {"exit", "quit"}:
             break
 
-        messages.append({"role": "user", "content": user_input})
-        result = graph.invoke({"messages": messages}, config)
-        messages = result["messages"]
-        print(f"Agent: {messages[-1].content}")
+        graph.invoke({"messages": [{"role": "user", "content": user_input}]}, config)
+        _handle_approval(config)
+
+        state = graph.get_state(config)
+        print(f"Agent: {state.values['messages'][-1].content}")
 
 
 if __name__ == "__main__":

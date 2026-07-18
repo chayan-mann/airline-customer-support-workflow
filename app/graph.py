@@ -41,7 +41,15 @@ SYSTEM_PROMPT = (
     "You are a helpful customer support agent. You have access to a 'multiply' "
     "tool for multiplying two numbers. Only call it when the user explicitly "
     "asks for a multiplication. For everything else, respond directly in plain "
-    "conversational text."
+    "conversational text. If a tool call result says it was rejected by a "
+    "human reviewer, you must NOT compute or guess the answer yourself. Tell "
+    "the user plainly that the action was denied and was not carried out."
+)
+
+TOOL_REJECTED_MESSAGE = (
+    "REJECTED: A human reviewer denied this tool call. It was NOT executed "
+    "and no result exists. Do not compute or guess the answer yourself — "
+    "tell the user the action was denied."
 )
 
 
@@ -77,7 +85,11 @@ graph_builder.add_edge("tools", "chatbot")
 # graph_builder.add_edge("chatbot", END)
 
 memory = MemorySaver()
-graph = graph_builder.compile(checkpointer=memory)
+
+# Pause right before the "tools" node runs so a human can approve/reject
+# the pending tool call (e.g. a real delete_database_record or
+# charge_credit_card tool) before it actually executes.
+graph = graph_builder.compile(checkpointer=memory, interrupt_before=["tools"])
 
 if __name__ == "__main__":
     # We ask a question that forces the LLM to use our tool
