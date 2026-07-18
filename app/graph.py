@@ -29,7 +29,7 @@ tools = [multiply]
 
 
 llm = init_chat_model(
-    f"ollama:{os.getenv('OLLAMA_MODEL', 'llama3.1:8b')}",
+    f"ollama:{os.getenv('OLLAMA_MODEL', 'qwen3.5:9b')}",
     base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
 )
 
@@ -37,9 +37,21 @@ llm = init_chat_model(
 llm_with_tools = llm.bind_tools(tools)
 
 
+SYSTEM_PROMPT = (
+    "You are a helpful customer support agent. You have access to a 'multiply' "
+    "tool for multiplying two numbers. Only call it when the user explicitly "
+    "asks for a multiplication. For everything else, respond directly in plain "
+    "conversational text."
+)
+
+
 def chatbot(state: State) -> State:
     # use the tool aware LLM to respond to the user message
-    return {"messages": [llm_with_tools.invoke(state["messages"])]}
+    messages = state["messages"]
+    first_role = getattr(messages[0], "type", None) if messages else None
+    if first_role != "system":
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}, *messages]
+    return {"messages": [llm_with_tools.invoke(messages)]}
 
 # build the graph
 graph_builder = StateGraph(State)
