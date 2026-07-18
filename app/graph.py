@@ -1,6 +1,7 @@
 
 
 import os
+from pathlib import Path
 from typing import Annotated
 
 from dotenv import load_dotenv
@@ -43,18 +44,7 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 SYSTEM_PROMPT = (
-    "You are a helpful customer support agent. You have access to a "
-    "'search_faq' tool that searches our FAQ knowledge base (shipping, "
-    "returns, refunds, billing, account, cancellations, contact info). "
-    "Call it whenever the user asks a support, policy, or how-to question. "
-    "Answer only using the retrieved FAQ content — if it says no relevant "
-    "articles were found, tell the user you don't have that information "
-    "rather than guessing or inventing policy. For plain conversational "
-    "messages that aren't support questions, respond directly without "
-    "calling the tool. If a tool call result says it was rejected by a "
-    "human reviewer, you must NOT answer using guessed or invented "
-    "information. Tell the user plainly that the search was denied and "
-    "was not carried out."
+    Path(__file__).parent.joinpath("prompts", "system_prompt.md").read_text().strip()
 )
 
 TOOL_REJECTED_MESSAGE = (
