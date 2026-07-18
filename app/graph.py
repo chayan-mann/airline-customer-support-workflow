@@ -12,20 +12,25 @@ from langgraph.graph.message import add_messages
 from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.memory import MemorySaver
 
+from app import knowledge_base
+
 load_dotenv()
 
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-# define a tool for multiplying two numbers
+# define a tool for searching the customer support FAQ knowledge base
 @tool
-def multiply(a: int, b:int) -> int:
-    """Multiplies two numbers."""
-    return a * b
+def search_faq(query: str) -> str:
+    """Search the customer support FAQ knowledge base for relevant articles."""
+    results = knowledge_base.search(query)
+    if not results:
+        return "No relevant FAQ articles found."
+    return "\n\n".join(doc.page_content for doc in results)
 
 # Group our tools into a list
-tools = [multiply]
+tools = [search_faq]
 
 
 llm = init_chat_model(
@@ -38,12 +43,18 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 SYSTEM_PROMPT = (
-    "You are a helpful customer support agent. You have access to a 'multiply' "
-    "tool for multiplying two numbers. Only call it when the user explicitly "
-    "asks for a multiplication. For everything else, respond directly in plain "
-    "conversational text. If a tool call result says it was rejected by a "
-    "human reviewer, you must NOT compute or guess the answer yourself. Tell "
-    "the user plainly that the action was denied and was not carried out."
+    "You are a helpful customer support agent. You have access to a "
+    "'search_faq' tool that searches our FAQ knowledge base (shipping, "
+    "returns, refunds, billing, account, cancellations, contact info). "
+    "Call it whenever the user asks a support, policy, or how-to question. "
+    "Answer only using the retrieved FAQ content — if it says no relevant "
+    "articles were found, tell the user you don't have that information "
+    "rather than guessing or inventing policy. For plain conversational "
+    "messages that aren't support questions, respond directly without "
+    "calling the tool. If a tool call result says it was rejected by a "
+    "human reviewer, you must NOT answer using guessed or invented "
+    "information. Tell the user plainly that the search was denied and "
+    "was not carried out."
 )
 
 TOOL_REJECTED_MESSAGE = (
@@ -93,9 +104,9 @@ graph = graph_builder.compile(checkpointer=memory, interrupt_before=["tools"])
 
 if __name__ == "__main__":
     # We ask a question that forces the LLM to use our tool
-    query = {"messages": [{"role": "user", "content": "What is 143 multiplied by 23?"}]}
-    
-    print("🚀 Running graph with a math question...\n")
+    query = {"messages": [{"role": "user", "content": "What is your return policy?"}]}
+
+    print("🚀 Running graph with a support question...\n")
     
     for event in graph.stream(query, stream_mode="updates"):
         for node_name, node_output in event.items():

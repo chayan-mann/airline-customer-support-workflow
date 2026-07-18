@@ -6,3 +6,4 @@ langgraph
 python-dotenv
 pydantic
 typing-extensions
+numpy
