@@ -7,10 +7,10 @@ import { MessageBubble } from "./MessageBubble";
 import { PendingToolCard } from "./PendingToolCard";
 
 interface Props {
-  sessionId: string;
+  chatId: string;
 }
 
-export function ChatWindow({ sessionId }: Props) {
+export function ChatWindow({ chatId }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingToolCalls, setPendingToolCalls] = useState<PendingToolCall[] | null>(null);
   const [input, setInput] = useState("");
@@ -21,7 +21,7 @@ export function ChatWindow({ sessionId }: Props) {
   useEffect(() => {
     let cancelled = false;
     setHistoryLoading(true);
-    getHistory(sessionId)
+    getHistory(chatId)
       .then((history) => {
         if (cancelled) return;
         setMessages(history.messages);
@@ -39,7 +39,7 @@ export function ChatWindow({ sessionId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [chatId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,7 +63,7 @@ export function ChatWindow({ sessionId }: Props) {
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setSending(true);
     try {
-      const response = await sendMessage(sessionId, text);
+      const response = await sendMessage(chatId, text);
       applyResponse(response);
     } finally {
       setSending(false);
@@ -73,7 +73,7 @@ export function ChatWindow({ sessionId }: Props) {
   async function handleApprove() {
     setSending(true);
     try {
-      applyResponse(await approve(sessionId));
+      applyResponse(await approve(chatId));
     } finally {
       setSending(false);
     }
@@ -82,7 +82,7 @@ export function ChatWindow({ sessionId }: Props) {
   async function handleReject() {
     setSending(true);
     try {
-      applyResponse(await reject(sessionId));
+      applyResponse(await reject(chatId));
     } finally {
       setSending(false);
     }

@@ -34,12 +34,24 @@ API server:
 uvicorn app.main:app --reload
 ```
 
-- `POST /chat {"session_id": "...", "message": "..."}` — send a message.
-  If the agent wants to search the FAQ, the response comes back with
-  `status: "pending_approval"` instead of auto-executing.
-- `POST /approve {"session_id": "..."}` — let the pending FAQ search run.
-- `POST /reject {"session_id": "..."}` — block the search; the agent is
-  told it was denied and won't guess an answer.
+All routes below except `/auth/*` and `/health` require being logged in
+(the JWT lives in an httpOnly cookie set by `/auth/login` or
+`/auth/register`, so a plain `curl` needs `-c`/`-b` to carry it along).
+
+- `POST /auth/register {"email": "...", "password": "..."}` / `POST /auth/login` —
+  create an account or sign in; sets the auth cookie.
+- `POST /auth/logout` — clears the cookie.
+- `GET /auth/me` — the current user, if logged in.
+- `GET /chats` / `POST /chats {"title": "..."}` — list or create the
+  current user's chats. Each chat's `id` is also its LangGraph `thread_id`.
+- `POST /chat {"chat_id": "...", "message": "..."}` — send a message in a
+  chat you own. If the agent wants to call a tool, the response comes back
+  with `status: "pending_approval"` instead of auto-executing.
+- `POST /approve {"chat_id": "..."}` — let the pending tool call run.
+- `POST /reject {"chat_id": "..."}` — block it; the agent is told it was
+  denied and won't guess an answer.
+- `GET /history/{chat_id}` — a chat's prior messages, for resuming in a
+  fresh browser tab.
 
 ### Frontend
 
