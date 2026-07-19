@@ -1,10 +1,10 @@
 from pathlib import Path
 
-from app.agents.common import build_prompt
-from app.llm import llm
-from app.tools import search_faq
+from app.agentic_ai.agents.common import build_prompt
+from app.agentic_ai.llm import llm
+from app.agentic_ai.tools import search_faq
 
-NAME = "general"
+NAME = "billing"
 TOOLS = [search_faq]
 PROMPT = build_prompt(Path(__file__).parent)
 

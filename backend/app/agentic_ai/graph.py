@@ -12,8 +12,8 @@ from langgraph.graph.message import add_messages
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
-from app.agents import SPECIALIST_AGENTS, escalation
-from app.llm import llm
+from app.agentic_ai.agents import SPECIALIST_AGENTS, escalation
+from app.agentic_ai.llm import llm
 
 load_dotenv()
 

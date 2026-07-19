@@ -3,7 +3,7 @@
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.agents.booking import data
+from app.agentic_ai.agents.booking import data
 
 
 class LookupBookingInput(BaseModel):

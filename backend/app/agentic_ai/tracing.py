@@ -4,7 +4,7 @@ render it as a Mermaid flowchart, using LangGraph's own stream_mode="updates"
 
 from pathlib import Path
 
-TRACE_DIR = Path(__file__).resolve().parent.parent / "traces"
+TRACE_DIR = Path(__file__).resolve().parent.parent.parent / "traces"
 
 
 def collect_steps(graph, input_data, config) -> list[tuple[str, dict]]:

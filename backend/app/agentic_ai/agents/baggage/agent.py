@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from app.agents.common import build_prompt
-from app.llm import llm
-from app.tools import search_faq
+from app.agentic_ai.agents.common import build_prompt
+from app.agentic_ai.llm import llm
+from app.agentic_ai.tools import search_faq
 
 NAME = "baggage"
 TOOLS = [search_faq]

@@ -1,9 +1,9 @@
 from pathlib import Path
 
-from app.agents.booking.tools import change_flight_date, lookup_booking, select_seat
-from app.agents.common import build_prompt
-from app.llm import llm
-from app.tools import search_faq
+from app.agentic_ai.agents.booking.tools import change_flight_date, lookup_booking, select_seat
+from app.agentic_ai.agents.common import build_prompt
+from app.agentic_ai.llm import llm
+from app.agentic_ai.tools import search_faq
 
 NAME = "booking"
 TOOLS = [search_faq, lookup_booking, change_flight_date, select_seat]
