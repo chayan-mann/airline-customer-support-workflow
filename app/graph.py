@@ -1,21 +1,19 @@
 
 
 import os
-from pathlib import Path
 from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 from typing_extensions import TypedDict
 from pydantic import BaseModel
 from langgraph.prebuilt import ToolNode, tools_condition
-from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
-from langchain.chat_models import init_chat_model
 from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
-from app import knowledge_base
+from app.agents import SPECIALIST_AGENTS, escalation
+from app.llm import llm
 
 load_dotenv()
 
@@ -24,54 +22,11 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
     intent: str
 
-# define a tool for searching the customer support FAQ knowledge base
-@tool
-def search_faq(query: str) -> str:
-    """Search the customer support FAQ knowledge base for relevant articles."""
-    results = knowledge_base.search(query)
-    if not results:
-        return "No relevant FAQ articles found."
-    return "\n\n".join(doc.page_content for doc in results)
-
-# Group our tools into a list
-tools = [search_faq]
-
-
-llm = init_chat_model(
-    f"ollama:{os.getenv('OLLAMA_MODEL', 'qwen3.5:9b')}",
-    base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-)
-
-# This tells the LLM: "Hey, you are allowed to call these functions"
-llm_with_tools = llm.bind_tools(tools)
-
-
-PROMPTS_DIR = Path(__file__).parent / "prompts"
-COMMON_RULES = (PROMPTS_DIR / "system_prompt.md").read_text().strip()
-
-# One topic-scope file per specialist; combined with the shared behavioral
-# rules above so those rules aren't duplicated across every specialist prompt.
-SPECIALIST_TOPIC_FILES = {
-    "booking": "booking_topics.md",
-    "baggage": "baggage_topics.md",
-    "billing": "billing_topics.md",
-    "general": "general_topics.md",
-}
-
-SPECIALIST_PROMPTS = {
-    name: f"{(PROMPTS_DIR / filename).read_text().strip()}\n\n{COMMON_RULES}"
-    for name, filename in SPECIALIST_TOPIC_FILES.items()
-}
 
 TOOL_REJECTED_MESSAGE = (
     "REJECTED: A human reviewer denied this tool call. It was NOT executed "
     "and no result exists. Do not compute or guess the answer yourself — "
     "tell the user the action was denied."
-)
-
-ESCALATION_MESSAGE = (
-    "This request needs a human specialist to help you safely — connecting "
-    "you with a live agent now. Please hold."
 )
 
 INTENT_CLASSIFIER_PROMPT = """Classify the user's most recent request into exactly one category:
@@ -98,29 +53,15 @@ def classify_intent(state: State) -> State:
     return {"intent": result.intent}
 
 
-def make_specialist_node(prompt: str):
-    """Build a node function bound to a specialist's system prompt."""
-
-    def node(state: State) -> State:
-        messages = [{"role": "system", "content": prompt}, *state["messages"]]
-        return {"messages": [llm_with_tools.invoke(messages)]}
-
-    return node
-
-
-def escalation_agent(state: State) -> State:
-    return {"messages": [{"role": "assistant", "content": ESCALATION_MESSAGE}]}
-
-
 # build the graph
 graph_builder = StateGraph(State)
 
-# add the classifier and one agent+tools pair per specialist
+# add the classifier and one agent+tools pair per specialist agent module
 graph_builder.add_node("classify_intent", classify_intent)
-for name, prompt in SPECIALIST_PROMPTS.items():
-    graph_builder.add_node(f"{name}_agent", make_specialist_node(prompt))
-    graph_builder.add_node(f"{name}_tools", ToolNode(tools))
-graph_builder.add_node("escalation_agent", escalation_agent)
+for agent in SPECIALIST_AGENTS:
+    graph_builder.add_node(f"{agent.NAME}_agent", agent.node)
+    graph_builder.add_node(f"{agent.NAME}_tools", ToolNode(agent.TOOLS))
+graph_builder.add_node("escalation_agent", escalation.node)
 
 # connect the nodes
 graph_builder.add_edge(START, "classify_intent")
@@ -129,29 +70,24 @@ graph_builder.add_edge(START, "classify_intent")
 graph_builder.add_conditional_edges(
     "classify_intent",
     lambda state: state["intent"],
-    {
-        "booking": "booking_agent",
-        "baggage": "baggage_agent",
-        "billing": "billing_agent",
-        "general": "general_agent",
-        "escalate": "escalation_agent",
-    },
+    {agent.NAME: f"{agent.NAME}_agent" for agent in SPECIALIST_AGENTS}
+    | {"escalate": "escalation_agent"},
 )
 
-for name in SPECIALIST_PROMPTS:
+for agent in SPECIALIST_AGENTS:
     # Pre-built LangGraph logic that reads tool_calls in messages; the path
     # map sends it to this specialist's own tools node instead of a shared one.
     graph_builder.add_conditional_edges(
-        f"{name}_agent",
+        f"{agent.NAME}_agent",
         tools_condition,
-        {"tools": f"{name}_tools", END: END},
+        {"tools": f"{agent.NAME}_tools", END: END},
     )
     # Connect each specialist's tools node back to that same specialist
-    graph_builder.add_edge(f"{name}_tools", f"{name}_agent")
+    graph_builder.add_edge(f"{agent.NAME}_tools", f"{agent.NAME}_agent")
 
 graph_builder.add_edge("escalation_agent", END)
 
-TOOL_NODE_NAMES = {f"{name}_tools" for name in SPECIALIST_PROMPTS}
+TOOL_NODE_NAMES = {f"{agent.NAME}_tools" for agent in SPECIALIST_AGENTS}
 
 connection_pool = ConnectionPool(
     conninfo=os.environ["DATABASE_URL"],
