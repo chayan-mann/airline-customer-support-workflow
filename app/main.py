@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from langchain_core.messages import ToolMessage
 from pydantic import BaseModel
 
-from app.graph import TOOL_REJECTED_MESSAGE, graph
+from app.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
 
 load_dotenv()
 
@@ -35,11 +35,18 @@ def _config(session_id: str) -> dict:
     return {"configurable": {"thread_id": session_id}}
 
 
+def _pending_tool_node(config: dict) -> str | None:
+    """Return the tool node name the graph is currently paused on, if any."""
+    state = graph.get_state(config)
+    pending = set(state.next) & TOOL_NODE_NAMES
+    return next(iter(pending), None)
+
+
 def _pending_tool_calls(config: dict) -> list[dict]:
     """Return tool calls the graph is currently paused on, if any."""
-    state = graph.get_state(config)
-    if "tools" not in state.next:
+    if _pending_tool_node(config) is None:
         return []
+    state = graph.get_state(config)
     last_message = state.values["messages"][-1]
     return getattr(last_message, "tool_calls", None) or []
 
@@ -68,8 +75,9 @@ def chat(request: ChatRequest):
     config = _config(request.session_id)
 
     # LangGraph automatically pulls the past history for this thread_id and appends your new message to it!
-    # If the run hits a tool call, execution pauses before the "tools" node
-    # and graph.invoke returns the paused state instead of a final reply.
+    # If the run hits a tool call, execution pauses before the relevant
+    # specialist's "*_tools" node and graph.invoke returns the paused state
+    # instead of a final reply.
     graph.invoke(
         {"messages": [{"role": "user", "content": request.message}]},
         config=config,
@@ -84,7 +92,7 @@ def approve(request: SessionRequest):
     if not _pending_tool_calls(config):
         raise HTTPException(status_code=400, detail="No pending tool call for this session")
 
-    # Resuming with None re-enters at the interrupted "tools" node and runs it for real.
+    # Resuming with None re-enters at the interrupted "*_tools" node and runs it for real.
     graph.invoke(None, config=config)
     return _respond(config)
 
@@ -97,12 +105,14 @@ def reject(request: SessionRequest):
     if not pending:
         raise HTTPException(status_code=400, detail="No pending tool call for this session")
 
-    # Fake the "tools" node's output with a rejection message instead of
-    # actually running the tool, then resume from right after "tools".
+    # Fake the pending tool node's output with a rejection message instead of
+    # actually running the tool, then resume from right after that node.
     rejection_messages = [
         ToolMessage(content=TOOL_REJECTED_MESSAGE, tool_call_id=tc["id"])
         for tc in pending
     ]
-    graph.update_state(config, {"messages": rejection_messages}, as_node="tools")
+    graph.update_state(
+        config, {"messages": rejection_messages}, as_node=_pending_tool_node(config)
+    )
     graph.invoke(None, config=config)
     return _respond(config)

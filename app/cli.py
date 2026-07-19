@@ -2,13 +2,19 @@
 
 from langchain_core.messages import ToolMessage
 
-from app.graph import TOOL_REJECTED_MESSAGE, graph
+from app.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
+
+
+def _pending_tool_node(config: dict) -> str | None:
+    state = graph.get_state(config)
+    pending = set(state.next) & TOOL_NODE_NAMES
+    return next(iter(pending), None)
 
 
 def _pending_tool_calls(config: dict) -> list[dict]:
-    state = graph.get_state(config)
-    if "tools" not in state.next:
+    if _pending_tool_node(config) is None:
         return []
+    state = graph.get_state(config)
     return getattr(state.values["messages"][-1], "tool_calls", None) or []
 
 
@@ -30,7 +36,9 @@ def _handle_approval(config: dict) -> None:
                 ToolMessage(content=TOOL_REJECTED_MESSAGE, tool_call_id=tc["id"])
                 for tc in pending
             ]
-            graph.update_state(config, {"messages": rejections}, as_node="tools")
+            graph.update_state(
+                config, {"messages": rejections}, as_node=_pending_tool_node(config)
+            )
             graph.invoke(None, config)
 
 
