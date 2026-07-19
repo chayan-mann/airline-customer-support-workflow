@@ -35,6 +35,20 @@ uvicorn app.main:app --reload
 - `POST /reject {"session_id": "..."}` — block the search; the agent is
   told it was denied and won't guess an answer.
 
+### Frontend
+
+A React + Ant Design chat UI lives in `frontend/`. It talks to the API
+server above (CORS is enabled for the Vite dev origin).
+
+```
+cd frontend
+npm install
+cp .env.example .env   # VITE_API_BASE_URL, defaults to http://localhost:8000
+npm run dev
+```
+
+Make sure `uvicorn app.main:app --reload` is running first.
+
 ### How it works
 
 `app/graph.py` builds a single-node LangGraph graph with one tool,

@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.messages import ToolMessage
 from pydantic import BaseModel
 
@@ -8,6 +9,14 @@ from app.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
 load_dotenv()
 
 app = FastAPI(title="AI Customer Support Agent")
+
+# Allow the local Vite dev server to call this API cross-origin.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):
@@ -28,6 +37,16 @@ class PendingToolCall(BaseModel):
 class ChatResponse(BaseModel):
     status: str  # "ok" or "pending_approval"
     reply: str | None = None
+    pending_tool_calls: list[PendingToolCall] | None = None
+
+
+class HistoryMessage(BaseModel):
+    role: str  # "user" or "agent"
+    content: str
+
+
+class HistoryResponse(BaseModel):
+    messages: list[HistoryMessage]
     pending_tool_calls: list[PendingToolCall] | None = None
 
 
@@ -68,6 +87,30 @@ def _respond(config: dict) -> ChatResponse:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/history/{session_id}", response_model=HistoryResponse)
+def history(session_id: str):
+    """Return a session's prior conversation, so a fresh browser tab can
+    resume an existing thread_id instead of showing an empty chat."""
+    config = _config(session_id)
+    state = graph.get_state(config)
+    raw_messages = state.values.get("messages", [])
+
+    messages = []
+    for msg in raw_messages:
+        if msg.type == "human":
+            messages.append(HistoryMessage(role="user", content=msg.content))
+        elif msg.type == "ai" and msg.content:
+            messages.append(HistoryMessage(role="agent", content=msg.content))
+
+    pending = _pending_tool_calls(config)
+    pending_tool_calls = (
+        [PendingToolCall(id=tc["id"], name=tc["name"], args=tc["args"]) for tc in pending]
+        if pending
+        else None
+    )
+    return HistoryResponse(messages=messages, pending_tool_calls=pending_tool_calls)
 
 
 @app.post("/chat", response_model=ChatResponse)
