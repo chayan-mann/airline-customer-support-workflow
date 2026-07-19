@@ -11,7 +11,8 @@ from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langchain.chat_models import init_chat_model
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.postgres import PostgresSaver
+from psycopg_pool import ConnectionPool
 
 from app import knowledge_base
 
@@ -85,12 +86,18 @@ graph_builder.add_edge("tools", "chatbot")
 
 # graph_builder.add_edge("chatbot", END)
 
-memory = MemorySaver()
+connection_pool = ConnectionPool(
+    conninfo=os.environ["DATABASE_URL"],
+    max_size=20,
+    kwargs={"autocommit": True, "prepare_threshold": 0},
+)
+checkpointer = PostgresSaver(connection_pool)
+checkpointer.setup()
 
 # Pause right before the "tools" node runs so a human can approve/reject
 # the pending tool call (e.g. a real delete_database_record or
 # charge_credit_card tool) before it actually executes.
-graph = graph_builder.compile(checkpointer=memory, interrupt_before=["tools"])
+graph = graph_builder.compile(checkpointer=checkpointer, interrupt_before=["tools"])
 
 if __name__ == "__main__":
     # We ask a question that forces the LLM to use our tool

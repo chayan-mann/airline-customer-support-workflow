@@ -3,6 +3,8 @@ uvicorn[standard]
 langchain
 langchain-ollama
 langgraph
+langgraph-checkpoint-postgres
+psycopg[binary,pool]
 python-dotenv
 pydantic
 typing-extensions
