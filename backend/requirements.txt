@@ -12,3 +12,4 @@ numpy
 sqlalchemy
 pyjwt
 bcrypt
+alembic

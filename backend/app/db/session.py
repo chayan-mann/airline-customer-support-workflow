@@ -12,14 +12,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 
-def _sqlalchemy_url() -> str:
+def sqlalchemy_url() -> str:
     raw = os.environ["DATABASE_URL"]
     if raw.startswith("postgresql://"):
         return raw.replace("postgresql://", "postgresql+psycopg://", 1)
     return raw
 
 
-engine = create_engine(_sqlalchemy_url())
+engine = create_engine(sqlalchemy_url())
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -33,15 +33,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def init_db() -> None:
-    """Create tables for every model that's been imported so far.
-
-    Called explicitly from main.py once the api/ routers (and therefore
-    app.models) are already imported, rather than importing models from
-    here directly — doing it here would create a circular import between
-    app.db and app.models, and depending on import order, Base.metadata
-    could still be empty at the time create_all runs.
-    """
-    Base.metadata.create_all(engine)

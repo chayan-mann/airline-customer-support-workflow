@@ -3,11 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, chats, conversation
-from app.db import init_db
 
 load_dotenv()
-
-init_db()
 
 app = FastAPI(title="AI Customer Support Agent")
 
