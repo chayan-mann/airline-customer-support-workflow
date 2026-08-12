@@ -117,7 +117,7 @@ def move_booking(
     alternatives list from list_alternative_flights() shows flight numbers
     and dates, never UUIDs.
     """
-    booking, _ = _get_owned_booking(db, user_id, confirmation_code)
+    booking, current_flight = _get_owned_booking(db, user_id, confirmation_code)
     new_flight = (
         db.query(Flight)
         .filter(Flight.flight_number == new_flight_number.strip().upper(), Flight.date == new_date)
@@ -125,6 +125,9 @@ def move_booking(
     )
     if new_flight is None:
         raise BookingError(f"No flight {new_flight_number!r} found on {new_date}.")
+
+    if new_flight.origin != current_flight.origin or new_flight.destination != current_flight.destination:
+        raise BookingError("The selected flight isn't on the same route as your current booking.")
 
     new_seat = new_seat.strip().upper()
     _validate_seat_available(db, new_flight.id, new_seat)
