@@ -93,7 +93,13 @@ def send_message(chat_id: str, message: str, user: User, db: Session) -> ChatRes
     # If the run hits a tool call, execution pauses before the relevant
     # specialist's "*_tools" node and graph.invoke returns the paused state
     # instead of a final reply.
-    graph.invoke({"messages": [{"role": "user", "content": message}]}, config=config)
+    graph.invoke(
+        {
+        "messages": [{"role": "user", "content": message}], 
+        "user_id": str(user.id)
+        },
+        config=config
+    )
     return _build_response(config)
 
 

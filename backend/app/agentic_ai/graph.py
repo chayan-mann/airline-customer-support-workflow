@@ -21,6 +21,7 @@ load_dotenv()
 class State(TypedDict):
     messages: Annotated[list, add_messages]
     intent: str
+    user_id: str
 
 
 TOOL_REJECTED_MESSAGE = (
