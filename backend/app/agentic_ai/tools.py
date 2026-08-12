@@ -2,7 +2,7 @@
 
 from langchain_core.tools import tool
 
-from app import knowledge_base
+from app.agentic_ai import knowledge_base
 
 
 @tool
