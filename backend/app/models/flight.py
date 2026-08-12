@@ -16,3 +16,4 @@ class Flight(Base):
     origin: Mapped[str] = mapped_column(String(3))
     destination: Mapped[str] = mapped_column(String(3))
     date: Mapped[str] = mapped_column(String(10))
+    departure_time: Mapped[str] = mapped_column(String(5))
