@@ -1,8 +1,13 @@
 import uuid
 import logging
+import secrets
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from app.models import Booking, Flight, Seat
+from app.models import Booking, Flight, Seat, FlightSelectionToken
+
+from datetime import datetime, timedelta, timezone
+
+TOKEN_TTL_MINUTES = 10
 
 def list_bookings_for_user(db:Session, user_id: uuid.UUID) -> list[tuple[Booking, Flight]]:
     """"Returns all the flight bookings for a given user, along with the associated flight details."""
@@ -17,6 +22,32 @@ def list_bookings_for_user(db:Session, user_id: uuid.UUID) -> list[tuple[Booking
 
 class BookingError(Exception):
     """A user-facing error from a booking operation (not found, seat taken, etc.)."""
+
+
+# function to generate a unique flight selection token
+def _generate_token_id(db: Session) -> str:
+    for _ in range(5):
+        token_id = "opt_" + secrets.token_hex(4)
+        if db.get(FlightSelectionToken, token_id) is None:
+            return token_id
+    raise RuntimeError("Failed to generate a unique flight selection token after 5 attempts.")
+
+# function to validate a flight selection token
+def _resolve_flight_token(db: Session, user_id: uuid.UUID, token_id: str) -> FlightSelectionToken:
+    """Validate a token without consuming it — safe to check repeatedly (e.g. list_available_seats followed by a retried move_booking)."""
+
+    token = db.get(FlightSelectionToken, token_id)
+
+    if token is None or token.user_id != user_id:
+        raise BookingError("That flight option is invalid. Call find_alternative_flights again.")
+    
+    if token.consumed_at is not None:
+        raise BookingError("That flight option has already been used. Call find_alternative_flights again for current options.")
+    
+    if token.expires_at < datetime.now(timezone.utc):
+        raise BookingError("That flight option has expired. Call find_alternative_flights again for current options.")
+    
+    return token
 
 
 def _get_owned_booking(db: Session, user_id: uuid.UUID, confirmation_code: str) -> tuple[Booking, Flight]:
@@ -50,10 +81,23 @@ def _sort_seat_numbers(seat_numbers: list[str]) -> list[str]:
     return sorted(seat_numbers, key=key)
 
 
+def list_available_seats_for_token(
+    db: Session, user_id: uuid.UUID, token_id: str
+) -> tuple[Flight, list[str]]:
+    """Available seats on the flight named by a flight-selection token."""
+    token = _resolve_flight_token(db, user_id, token_id)
+    flight = db.get(Flight, token.flight_id)
+    return flight, list_available_seats(db, flight.id)  # existing helper, unchanged
+
+
 def list_alternative_flights(
     db: Session, user_id: uuid.UUID, confirmation_code: str
-) -> tuple[Booking, Flight, list[Flight]]:
-    """A booking's current flight, plus other flights on the same route (excluding itself)."""
+) -> tuple[Booking, Flight, list[tuple[str, Flight]]]:
+    """A booking's current flight, plus other same-route flights, each paired
+    with a single-use token proving this exact option was legitimately
+    offered — move_booking requires one of these tokens, never a bare
+    flight_number/date, so it can't be called with a fabricated flight."""
+
     booking, current_flight = _get_owned_booking(db, user_id, confirmation_code)
     alternatives = (
         db.query(Flight)
@@ -65,16 +109,30 @@ def list_alternative_flights(
         .order_by(Flight.date, Flight.departure_time)
         .all()
     )
-    return booking, current_flight, alternatives
 
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
+    options: list[tuple[str, Flight]] = []
+    for flight in alternatives:
+        token_id = _generate_token_id(db)
+        db.add(FlightSelectionToken(
+            id=token_id,
+            user_id=user_id,
+            booking_id=booking.id,
+            flight_id=flight.id,
+            expires_at=expires_at)
+        )
+        options.append((token_id, flight))
+    db.commit()
+    # expire_on_commit expired every object this session touched — booking,
+    # current_flight, and each alternative flight — so all need refreshing
+    # before the caller can safely read their attributes after closing the
+    # session (same issue as move_booking below).
+    db.refresh(booking)
+    db.refresh(current_flight)
+    for _, flight in options:
+        db.refresh(flight)
 
-def get_flight_by_number_date(db: Session, flight_number: str, date: str) -> Flight | None:
-    """Resolve a flight the LLM referenced by number+date (never a raw UUID)."""
-    return (
-        db.query(Flight)
-        .filter(Flight.flight_number == flight_number.strip().upper(), Flight.date == date)
-        .first()
-    )
+    return booking, current_flight, options
 
 
 def list_available_seats(db: Session, flight_id: uuid.UUID) -> list[str]:
@@ -103,37 +161,30 @@ def _validate_seat_available(db: Session, flight_id: uuid.UUID, seat_number: str
 
 
 def move_booking(
-    db: Session,
-    user_id: uuid.UUID,
-    confirmation_code: str,
-    new_flight_number: str,
-    new_date: str,
-    new_seat: str,
+    db: Session, user_id: uuid.UUID, confirmation_code: str, flight_option_token: str, new_seat: str
 ) -> tuple[Booking, Flight]:
-    """Move a booking to a different flight and seat, freeing its old seat.
-
-    The new flight is identified by (flight_number, date) rather than its
-    internal id, since that's the only reference the LLM ever sees — the
-    alternatives list from list_alternative_flights() shows flight numbers
-    and dates, never UUIDs.
+    """Move a booking to the flight named by a flight-selection token, and a
+    seat on it — freeing the old seat. Never accepts a flight_number/date
+    directly; the token (from list_alternative_flights) is the only way to
+    name the target flight, so this can't be called with a fabricated one.
     """
     booking, current_flight = _get_owned_booking(db, user_id, confirmation_code)
-    new_flight = (
-        db.query(Flight)
-        .filter(Flight.flight_number == new_flight_number.strip().upper(), Flight.date == new_date)
-        .first()
-    )
-    if new_flight is None:
-        raise BookingError(f"No flight {new_flight_number!r} found on {new_date}.")
+    token = _resolve_flight_token(db, user_id, flight_option_token)
+    if token.booking_id != booking.id:
+        raise BookingError("That flight option doesn't belong to this booking. Call find_alternative_flights again.")
 
+    new_flight = db.get(Flight, token.flight_id)
     if new_flight.origin != current_flight.origin or new_flight.destination != current_flight.destination:
-        raise BookingError("The selected flight isn't on the same route as your current booking.")
+        # Defense in depth — tokens are only ever issued for same-route
+        # flights by construction, so this should be unreachable.
+        raise BookingError("That flight isn't on the same route as this booking.")
 
     new_seat = new_seat.strip().upper()
     _validate_seat_available(db, new_flight.id, new_seat)
 
     booking.flight_id = new_flight.id
     booking.seat = new_seat
+    token.consumed_at = datetime.now(timezone.utc)
     try:
         db.commit()
     except IntegrityError:

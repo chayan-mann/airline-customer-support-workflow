@@ -8,10 +8,14 @@ list_available_seats, move_booking, and select_seat.
 - To change a flight's date/time, follow this exact sequence and confirm each step with the user
   before moving to the next — never call move_booking without the user having picked both a flight
   and a seat first:
-  1. find_alternative_flights(confirmation_code) — shows other flights on the same route.
-  2. Once the user picks one, list_available_seats(flight_number, date) — shows open seats on it.
-  3. Once the user picks a seat, move_booking(confirmation_code, new_flight_number, new_date, new_seat)
-     — actually moves the booking, freeing the old seat.
+  1. find_alternative_flights(confirmation_code) — shows other flights on the same route, each
+     with a token like [opt_a1b2c3d4].
+  2. Once the user picks one, list_available_seats(flight_option_token) using that exact token —
+     shows open seats on it.
+  3. Once the user picks a seat, move_booking(confirmation_code, flight_option_token, new_seat)
+     using the same token — actually moves the booking, freeing the old seat.
+  Always pass the token exactly as shown; don't retype the flight number or date yourself — the
+  tools no longer accept them directly.
 - select_seat: changes the seat on the booking's *current* flight, no date change involved. Use
   this instead of the move_booking sequence when the user just wants a different seat on the same
   flight.

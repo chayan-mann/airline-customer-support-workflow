@@ -43,13 +43,13 @@ def find_alternative_flights(
 ) -> str:
     """Find other flights on the same route as an existing booking, to change its date/time.
 
-    Call this first when the user wants to change their flight date — it shows what's
-    available. Follow up with list_available_seats once they pick a flight, then
-    move_booking to complete the change.
+    Call this first when the user wants to change their flight date. Each option comes
+    with a token — pass that exact token (not the flight number) to list_available_seats
+    and move_booking; those tools reject anything that isn't a token from this call.
     """
     db = SessionLocal()
     try:
-        booking, current_flight, alternatives = booking_service.list_alternative_flights(
+        booking, current_flight, options = booking_service.list_alternative_flights(
             db, uuid.UUID(user_id), confirmation_code
         )
     except BookingError as e:
@@ -62,66 +62,73 @@ def find_alternative_flights(
         f"from {current_flight.origin} to {current_flight.destination} on {current_flight.date} "
         f"at {current_flight.departure_time}, seat {booking.seat}."
     )
-    if not alternatives:
+    if not options:
         return f"{header} No other flights are available on this route."
 
-    options = "\n".join(f"- {f.flight_number} on {f.date} at {f.departure_time}" for f in alternatives)
-    return f"{header}\n\nOther available flights on this route:\n{options}"
+    lines = "\n".join(
+        f"- [{token}] {f.flight_number} on {f.date} at {f.departure_time}" for token, f in options
+    )
+    return f"{header}\n\nOther available flights on this route:\n{lines}"
 
 
 class ListSeatsInput(BaseModel):
-    flight_number: str = Field(description="The flight number to check seats for, e.g. AI205")
-    date: str = Field(description="The flight's date, e.g. 2026-08-14")
+    flight_option_token: str = Field(
+        description="The token shown next to the chosen flight from find_alternative_flights, e.g. 'opt_a1b2c3d4'"
+    )
 
 
 @tool(args_schema=ListSeatsInput)
-def list_available_seats(flight_number: str, date: str) -> str:
-    """List available seats on a specific flight (by flight number and date).
+def list_available_seats(
+    flight_option_token: str,
+    user_id: Annotated[str, InjectedState("user_id")],
+) -> str:
+    """List available seats on a flight the user picked from find_alternative_flights.
 
-    Call this after find_alternative_flights, once the user has picked a candidate
-    flight, to show seat options before completing the change with move_booking.
+    Takes the option token from that call, not a flight number — call
+    find_alternative_flights first if you don't have one.
     """
     db = SessionLocal()
     try:
-        flight = booking_service.get_flight_by_number_date(db, flight_number, date)
-        if flight is None:
-            return f"No flight {flight_number!r} found on {date}."
-        seats = booking_service.list_available_seats(db, flight.id)
+        flight, seats = booking_service.list_available_seats_for_token(
+            db, uuid.UUID(user_id), flight_option_token
+        )
+    except BookingError as e:
+        return str(e)
     finally:
         db.close()
 
     if not seats:
-        return f"No seats are available on {flight_number} ({date})."
+        return f"No seats are available on {flight.flight_number} ({flight.date})."
 
     sample = ", ".join(seats[:10])
     more = f" (and {len(seats) - 10} more)" if len(seats) > 10 else ""
-    return f"{len(seats)} seats available on {flight_number} ({date}): {sample}{more}"
+    return f"{len(seats)} seats available on {flight.flight_number} ({flight.date}): {sample}{more}"
 
 
 class MoveBookingInput(BaseModel):
     confirmation_code: str = Field(description="The booking confirmation code")
-    new_flight_number: str = Field(description="The flight number to move to, e.g. AI205")
-    new_date: str = Field(description="The new flight's date, e.g. 2026-08-14")
+    flight_option_token: str = Field(
+        description="The token from find_alternative_flights for the chosen flight, e.g. 'opt_a1b2c3d4'"
+    )
     new_seat: str = Field(description="The chosen seat on the new flight, e.g. 5A")
 
 
 @tool(args_schema=MoveBookingInput)
 def move_booking(
     confirmation_code: str,
-    new_flight_number: str,
-    new_date: str,
+    flight_option_token: str,
     new_seat: str,
     user_id: Annotated[str, InjectedState("user_id")],
 ) -> str:
     """Move a booking to a different flight and seat, freeing its old seat.
 
-    Only call this after the user has confirmed a specific flight (from
-    find_alternative_flights) and seat (from list_available_seats).
+    Only call this with a flight_option_token from find_alternative_flights
+    and a seat the user picked from list_available_seats.
     """
     db = SessionLocal()
     try:
         booking, new_flight = booking_service.move_booking(
-            db, uuid.UUID(user_id), confirmation_code, new_flight_number, new_date, new_seat
+            db, uuid.UUID(user_id), confirmation_code, flight_option_token, new_seat
         )
     except BookingError as e:
         return str(e)
