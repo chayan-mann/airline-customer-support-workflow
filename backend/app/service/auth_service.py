@@ -57,6 +57,7 @@ def authenticate_user(db: Session, response: Response, email: str, password: str
     return _to_user_out(user)
 
 
+
 def logout(response: Response) -> None:
     # Stateless: the token itself stays valid until it expires, but the
     # browser no longer holds/sends it once the cookie is cleared.
