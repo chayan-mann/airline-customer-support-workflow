@@ -70,7 +70,24 @@ def _get_owned_booking(db: Session, user_id: uuid.UUID, confirmation_code: str) 
         raise BookingError(f"No booking found for confirmation code {confirmation_code!r}.")
     return row
 
+def _get_owned_booking_by_id(db:Session, user_id: uuid.UUID, booking_id : uuid.UUID) -> tuple[Booking, Flight]:
+    """Look up a booking by its id, scoped to the given user.
 
+    Raises BookingError if there's no match — whether the id doesn't exist
+    or belongs to someone else. Callers must not distinguish the two cases
+    in any user-facing message.
+    """
+    row = (
+        db.query(Booking, Flight)
+        .join(Flight, Booking.flight_id == Flight.id)
+        .filter(Booking.id == booking_id, Booking.user_id == user_id)
+        .first()
+    )
+
+    if row is None:
+        raise BookingError("No booking found with this booking id.")
+    return row
+     
 def _sort_seat_numbers(seat_numbers: list[str]) -> list[str]:
     """Sort seat labels like '2A', '14C' numerically by row, not lexically."""
     def key(seat_number: str) -> tuple[int, str]:
@@ -216,3 +233,25 @@ def update_seat(
     db.refresh(flight)
     return booking, flight
 
+
+def cancel_booking(db: Session, user_id: uuid.UUID, booking_id: uuid.UUID) -> tuple[str, Flight]:
+    """Cancel a user's booking, freeing its seat.
+
+    Returns the confirmation code (captured before deletion, since the
+    Booking row won't exist to read from afterward) and the flight it was on.
+    """
+    booking, flight = _get_owned_booking_by_id(db, user_id, booking_id)
+    code = booking.confirmation_code
+
+
+    db.query(FlightSelectionToken).filter(FlightSelectionToken.booking_id == booking.id).delete()
+
+    db.delete(booking)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BookingError("Couldn't cancel this booking due to a database error. Please try again.")
+
+    db.refresh(flight)
+    return code, flight
