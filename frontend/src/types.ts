@@ -8,6 +8,7 @@ export interface ChatResponse {
   status: "ok" | "pending_approval";
   reply: string | null;
   pending_tool_calls: PendingToolCall[] | null;
+  chat_title: string | null;
 }
 
 export interface HistoryMessage {

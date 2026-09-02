@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Avatar, Button, Card, Empty, Layout, Space, Typography } from "antd";
 import { LogoutOutlined, UserOutlined } from "@ant-design/icons";
-import { createChat, listChats } from "../api";
+import { createChat, deleteChat, listChats, renameChat } from "../api";
 import { useAuth } from "../auth/AuthContext";
 import { ChatSidebar } from "../components/ChatSidebar";
 import { ChatWindow } from "../components/ChatWindow";
@@ -37,6 +37,28 @@ export function ChatPage() {
     }
   }
 
+  async function handleRename(chatId: string, title: string) {
+    const updated = await renameChat(chatId, title);
+    setChats((prev) => prev.map((c) => (c.id === chatId ? updated : c)));
+  }
+
+  async function handleDelete(chatId: string) {
+    await deleteChat(chatId);
+    setChats((prev) => {
+      const next = prev.filter((c) => c.id !== chatId);
+      if (activeChatId === chatId) {
+        setActiveChatId(next[0]?.id ?? null);
+      }
+      return next;
+    });
+  }
+
+  // Called by ChatWindow when a message's response carries an auto-generated
+  // title (the chat's first message), so the sidebar updates without a refetch.
+  function handleChatTitled(chatId: string, title: string) {
+    setChats((prev) => prev.map((c) => (c.id === chatId ? { ...c, title } : c)));
+  }
+
   return (
     <Layout style={{ minHeight: "100vh", background: "#fff" }}>
       <Header
@@ -69,6 +91,8 @@ export function ChatPage() {
             activeChatId={activeChatId}
             onSelect={setActiveChatId}
             onNewChat={handleNewChat}
+            onRename={handleRename}
+            onDelete={handleDelete}
           />
         </Sider>
         <Content
@@ -84,7 +108,7 @@ export function ChatPage() {
               style={{ width: "100%", maxWidth: 760, height: "calc(100vh - 128px)" }}
               styles={{ body: { height: "100%", padding: 0 } }}
             >
-              <ChatWindow chatId={activeChatId} />
+              <ChatWindow chatId={activeChatId} onChatTitled={handleChatTitled} />
             </Card>
           ) : (
             <div style={{ margin: "auto" }}>

@@ -20,6 +20,9 @@ class ChatResponse(BaseModel):
     status: str  # "ok" or "pending_approval"
     reply: str | None = None
     pending_tool_calls: list[PendingToolCall] | None = None
+    # Set only when this message was the chat's first and auto-titling
+    # succeeded, so the frontend can update the sidebar without refetching.
+    chat_title: str | None = None
 
 
 class HistoryMessage(BaseModel):

@@ -10,8 +10,15 @@ from langchain_core.messages import ToolMessage
 from sqlalchemy.orm import Session
 
 from app.agentic_ai.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
+from app.agentic_ai.llm import llm
 from app.models import Chat, User
 from app.schema.conversation import ChatResponse, HistoryMessage, HistoryResponse, PendingToolCall
+
+TITLE_SYSTEM_PROMPT = (
+    "Summarize the user's message into a short chat title: 3-6 words, title "
+    "case, no quotation marks, no trailing punctuation. Reply with only the "
+    "title, nothing else."
+)
 
 
 def _thread_config(chat_id: str) -> dict:
@@ -85,9 +92,36 @@ def get_history(chat_id: str, user: User, db: Session) -> HistoryResponse:
     return HistoryResponse(messages=messages, pending_tool_calls=pending_tool_calls)
 
 
+def _generate_chat_title(message: str) -> str:
+    """Best-effort short title for a new chat, derived from its first message."""
+    result = llm.invoke(
+        [
+            {"role": "system", "content": TITLE_SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ]
+    )
+    title = (result.content or "").strip().strip('"').strip("'")
+    return title[:100] if title else "New Chat"
+
+
 def send_message(chat_id: str, message: str, user: User, db: Session) -> ChatResponse:
-    get_owned_chat(chat_id, user, db)
+    chat = get_owned_chat(chat_id, user, db)
     config = _thread_config(chat_id)
+    is_first_message = not graph.get_state(config).values.get("messages")
+
+    new_title = None
+    # Only auto-title chats still on the default name — respects a manual
+    # rename the user made before sending anything.
+    if is_first_message and chat.title == "New Chat":
+        try:
+            new_title = _generate_chat_title(message)
+            chat.title = new_title
+            db.commit()
+        except Exception:
+            # A title-generation hiccup (e.g. Ollama momentarily unreachable)
+            # must never block sending the actual message.
+            db.rollback()
+            new_title = None
 
     # LangGraph automatically pulls the past history for this thread_id and appends your new message to it!
     # If the run hits a tool call, execution pauses before the relevant
@@ -95,12 +129,14 @@ def send_message(chat_id: str, message: str, user: User, db: Session) -> ChatRes
     # instead of a final reply.
     graph.invoke(
         {
-        "messages": [{"role": "user", "content": message}], 
+        "messages": [{"role": "user", "content": message}],
         "user_id": str(user.id)
         },
         config=config
     )
-    return _build_response(config)
+    response = _build_response(config)
+    response.chat_title = new_title
+    return response
 
 
 def approve_pending_tool(chat_id: str, user: User, db: Session) -> ChatResponse:

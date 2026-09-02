@@ -8,9 +8,10 @@ import { PendingToolCard } from "./PendingToolCard";
 
 interface Props {
   chatId: string;
+  onChatTitled?: (chatId: string, title: string) => void;
 }
 
-export function ChatWindow({ chatId }: Props) {
+export function ChatWindow({ chatId, onChatTitled }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [pendingToolCalls, setPendingToolCalls] = useState<PendingToolCall[] | null>(null);
   const [input, setInput] = useState("");
@@ -53,6 +54,10 @@ export function ChatWindow({ chatId }: Props) {
       }
     } else {
       setPendingToolCalls(response.pending_tool_calls);
+    }
+    // Set only on the chat's first message, when auto-titling succeeded.
+    if (response.chat_title) {
+      onChatTitled?.(chatId, response.chat_title);
     }
   }
 

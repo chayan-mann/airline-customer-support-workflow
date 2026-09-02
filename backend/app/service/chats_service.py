@@ -2,8 +2,10 @@
 
 from sqlalchemy.orm import Session
 
+from app.agentic_ai.graph import checkpointer
 from app.models import Chat, User
 from app.schema.chats import ChatOut
+from app.service.conversation_service import get_owned_chat
 
 
 def _to_chat_out(chat: Chat) -> ChatOut:
@@ -28,3 +30,21 @@ def create_chat(db: Session, user: User, title: str | None) -> ChatOut:
     db.commit()
     db.refresh(chat)
     return _to_chat_out(chat)
+
+
+def rename_chat(chat_id: str, title: str, user: User, db: Session) -> ChatOut:
+    chat = get_owned_chat(chat_id, user, db)
+    chat.title = title.strip() or "New Chat"
+    db.commit()
+    db.refresh(chat)
+    return _to_chat_out(chat)
+
+
+def delete_chat(chat_id: str, user: User, db: Session) -> None:
+    chat = get_owned_chat(chat_id, user, db)
+    # Chat.id doubles as the LangGraph thread_id (see Chat's docstring) —
+    # clean up its checkpointed conversation state too, or it lingers in
+    # Postgres forever with nothing pointing back at it.
+    checkpointer.delete_thread(chat_id)
+    db.delete(chat)
+    db.commit()

@@ -27,6 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(res.status, detail);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -61,6 +62,17 @@ export function createChat(title?: string): Promise<Chat> {
     method: "POST",
     body: JSON.stringify({ title: title ?? null }),
   });
+}
+
+export function renameChat(chatId: string, title: string): Promise<Chat> {
+  return request(`/chats/${encodeURIComponent(chatId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export function deleteChat(chatId: string): Promise<void> {
+  return request(`/chats/${encodeURIComponent(chatId)}`, { method: "DELETE" });
 }
 
 export function getHistory(chatId: string): Promise<HistoryResponse> {
