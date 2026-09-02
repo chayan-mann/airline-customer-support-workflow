@@ -3,7 +3,9 @@
 Owns all direct interaction with the compiled LangGraph `graph` object.
 """
 
+import json
 import uuid
+from typing import Iterator
 
 from fastapi import HTTPException
 from langchain_core.messages import ToolMessage
@@ -19,6 +21,17 @@ TITLE_SYSTEM_PROMPT = (
     "case, no quotation marks, no trailing punctuation. Reply with only the "
     "title, nothing else."
 )
+
+# Friendly status text for each graph node, shown to the user while a
+# request is in flight instead of a single static spinner (see _stream_graph).
+AGENT_STATUS_MESSAGES = {
+    "classify_intent": "Understanding your request…",
+    "booking_agent": "Looking into your booking…",
+    "baggage_agent": "Looking into your baggage question…",
+    "billing_agent": "Looking into your billing question…",
+    "general_agent": "Looking into that…",
+    "escalation_agent": "Connecting you to a specialist…",
+}
 
 
 def _thread_config(chat_id: str) -> dict:
@@ -68,6 +81,44 @@ def _build_response(config: dict) -> ChatResponse:
     return ChatResponse(status="ok", reply=state.values["messages"][-1].content)
 
 
+def _describe_step(node_name: str, node_output: dict) -> str | None:
+    """Turn one LangGraph node's output into a short human status line, so
+    the frontend can show live progress instead of one static spinner."""
+    messages = node_output.get("messages") or []
+    last = messages[-1] if messages else None
+    tool_calls = getattr(last, "tool_calls", None) if last else None
+
+    if tool_calls:
+        names = ", ".join(tc["name"] for tc in tool_calls)
+        return f"Calling {names}…"
+    if node_name in AGENT_STATUS_MESSAGES:
+        return AGENT_STATUS_MESSAGES[node_name]
+    if node_name.endswith("_tools"):
+        return "Got a result, thinking…"
+    return None
+
+
+def _stream_graph(
+    graph_input, config: dict, extra_final_fields: dict | None = None
+) -> Iterator[str]:
+    """Run the graph, yielding one NDJSON line per step as a live status
+    update, then a final line shaped like ChatResponse (the same payload
+    send_message/approve/reject used to return directly, plus any
+    extra_final_fields merged in — e.g. chat_title).
+    """
+    for event in graph.stream(graph_input, config=config, stream_mode="updates"):
+        for node_name, node_output in event.items():
+            text = _describe_step(node_name, node_output)
+            if text:
+                yield json.dumps({"type": "status", "text": text}) + "\n"
+
+    response = _build_response(config)
+    payload = {"type": "final", **response.model_dump()}
+    if extra_final_fields:
+        payload.update(extra_final_fields)
+    yield json.dumps(payload) + "\n"
+
+
 def get_history(chat_id: str, user: User, db: Session) -> HistoryResponse:
     """Return a chat's prior conversation, so a fresh browser tab can
     resume an existing chat instead of showing an empty window."""
@@ -104,7 +155,9 @@ def _generate_chat_title(message: str) -> str:
     return title[:100] if title else "New Chat"
 
 
-def send_message(chat_id: str, message: str, user: User, db: Session) -> ChatResponse:
+def send_message(chat_id: str, message: str, user: User, db: Session) -> Iterator[str]:
+    """Stream NDJSON status lines while the graph runs, ending with a final
+    line shaped like ChatResponse — see _stream_graph."""
     chat = get_owned_chat(chat_id, user, db)
     config = _thread_config(chat_id)
     is_first_message = not graph.get_state(config).values.get("messages")
@@ -125,34 +178,33 @@ def send_message(chat_id: str, message: str, user: User, db: Session) -> ChatRes
 
     # LangGraph automatically pulls the past history for this thread_id and appends your new message to it!
     # If the run hits a tool call, execution pauses before the relevant
-    # specialist's "*_tools" node and graph.invoke returns the paused state
-    # instead of a final reply.
-    graph.invoke(
+    # specialist's "*_tools" node and graph.stream() stops yielding instead
+    # of ever reaching a final reply.
+    return _stream_graph(
         {
         "messages": [{"role": "user", "content": message}],
         "user_id": str(user.id)
         },
-        config=config
+        config,
+        extra_final_fields={"chat_title": new_title},
     )
-    response = _build_response(config)
-    response.chat_title = new_title
-    return response
 
 
-def approve_pending_tool(chat_id: str, user: User, db: Session) -> ChatResponse:
-    """Let the pending tool call actually execute, then continue the graph."""
+def approve_pending_tool(chat_id: str, user: User, db: Session) -> Iterator[str]:
+    """Let the pending tool call actually execute, then continue the graph
+    (streamed the same way as send_message)."""
     get_owned_chat(chat_id, user, db)
     config = _thread_config(chat_id)
     if not _pending_tool_calls(config):
         raise HTTPException(status_code=400, detail="No pending tool call for this chat")
 
     # Resuming with None re-enters at the interrupted "*_tools" node and runs it for real.
-    graph.invoke(None, config=config)
-    return _build_response(config)
+    return _stream_graph(None, config)
 
 
-def reject_pending_tool(chat_id: str, user: User, db: Session) -> ChatResponse:
-    """Block the pending tool call from executing and tell the model it was denied."""
+def reject_pending_tool(chat_id: str, user: User, db: Session) -> Iterator[str]:
+    """Block the pending tool call from executing and tell the model it was
+    denied (streamed the same way as send_message)."""
     get_owned_chat(chat_id, user, db)
     config = _thread_config(chat_id)
     pending = _pending_tool_calls(config)
@@ -168,5 +220,4 @@ def reject_pending_tool(chat_id: str, user: User, db: Session) -> ChatResponse:
     graph.update_state(
         config, {"messages": rejection_messages}, as_node=_pending_tool_node(config)
     )
-    graph.invoke(None, config=config)
-    return _build_response(config)
+    return _stream_graph(None, config)
