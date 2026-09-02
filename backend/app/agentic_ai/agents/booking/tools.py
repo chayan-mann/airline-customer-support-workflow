@@ -162,6 +162,3 @@ def select_seat(
         db.close()
 
     return f"Seat for booking {booking.confirmation_code} has been changed to {booking.seat}."
-
-@tool
-def cancel_booking
