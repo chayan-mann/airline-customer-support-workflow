@@ -79,23 +79,83 @@ export function getHistory(chatId: string): Promise<HistoryResponse> {
   return request(`/history/${encodeURIComponent(chatId)}`);
 }
 
-export function sendMessage(chatId: string, message: string): Promise<ChatResponse> {
-  return request("/chat", {
+// /chat, /approve, /reject stream newline-delimited JSON: zero or more
+// {"type": "status", "text": "..."} progress lines (one per graph step),
+// then one {"type": "final", ...ChatResponse fields} line. onStatus fires
+// for each status line as it arrives; the returned promise resolves with
+// the final line once the stream ends.
+async function streamRequest(
+  path: string,
+  body: unknown,
+  onStatus: (text: string) => void,
+): Promise<ChatResponse> {
+  const res = await fetch(`${BASE_URL}${path}`, {
     method: "POST",
-    body: JSON.stringify({ chat_id: chatId, message }),
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
+  if (!res.ok) {
+    let detail = `POST ${path} failed: ${res.status}`;
+    try {
+      const errBody = await res.json();
+      if (errBody?.detail) detail = errBody.detail;
+    } catch {
+      // response wasn't JSON; keep the default message
+    }
+    throw new ApiError(res.status, detail);
+  }
+  if (!res.body) throw new ApiError(res.status, "Empty response body");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let final: ChatResponse | null = null;
+
+  function handleLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const event = JSON.parse(trimmed);
+    if (event.type === "status" && event.text) {
+      onStatus(event.text);
+    } else if (event.type === "final") {
+      final = {
+        status: event.status,
+        reply: event.reply ?? null,
+        pending_tool_calls: event.pending_tool_calls ?? null,
+        chat_title: event.chat_title ?? null,
+      };
+    }
+  }
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newlineIndex: number;
+    while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+      handleLine(buffer.slice(0, newlineIndex));
+      buffer = buffer.slice(newlineIndex + 1);
+    }
+  }
+  if (buffer.trim()) handleLine(buffer);
+
+  if (!final) throw new ApiError(500, "Stream ended without a final response");
+  return final;
 }
 
-export function approve(chatId: string): Promise<ChatResponse> {
-  return request("/approve", {
-    method: "POST",
-    body: JSON.stringify({ chat_id: chatId }),
-  });
+export function sendMessage(
+  chatId: string,
+  message: string,
+  onStatus: (text: string) => void,
+): Promise<ChatResponse> {
+  return streamRequest("/chat", { chat_id: chatId, message }, onStatus);
 }
 
-export function reject(chatId: string): Promise<ChatResponse> {
-  return request("/reject", {
-    method: "POST",
-    body: JSON.stringify({ chat_id: chatId }),
-  });
+export function approve(chatId: string, onStatus: (text: string) => void): Promise<ChatResponse> {
+  return streamRequest("/approve", { chat_id: chatId }, onStatus);
+}
+
+export function reject(chatId: string, onStatus: (text: string) => void): Promise<ChatResponse> {
+  return streamRequest("/reject", { chat_id: chatId }, onStatus);
 }

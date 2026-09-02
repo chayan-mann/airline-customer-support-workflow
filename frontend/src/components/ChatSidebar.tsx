@@ -88,7 +88,8 @@ export function ChatSidebar({
                     style={{
                       display: "flex",
                       gap: 2,
-                      visibility: hoveredId === chat.id ? "visible" : "hidden",
+                      opacity: hoveredId === chat.id ? 1 : 0.35,
+                      transition: "opacity 0.15s",
                     }}
                   >
                     <Button

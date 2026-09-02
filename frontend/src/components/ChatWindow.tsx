@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Input, Spin } from "antd";
-import { SendOutlined } from "@ant-design/icons";
+import { Avatar, Button, Input, Spin, Typography } from "antd";
+import { RobotOutlined, SendOutlined } from "@ant-design/icons";
 import { approve, getHistory, reject, sendMessage } from "../api";
 import type { ChatMessage, ChatResponse, PendingToolCall } from "../types";
 import { MessageBubble } from "./MessageBubble";
 import { PendingToolCard } from "./PendingToolCard";
+
+const { Text } = Typography;
 
 interface Props {
   chatId: string;
@@ -17,6 +19,7 @@ export function ChatWindow({ chatId, onChatTitled }: Props) {
   const [input, setInput] = useState("");
   const [historyLoading, setHistoryLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [statusText, setStatusText] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -44,7 +47,7 @@ export function ChatWindow({ chatId, onChatTitled }: Props) {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pendingToolCalls]);
+  }, [messages, pendingToolCalls, statusText]);
 
   function applyResponse(response: ChatResponse) {
     if (response.status === "ok") {
@@ -67,29 +70,35 @@ export function ChatWindow({ chatId, onChatTitled }: Props) {
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setSending(true);
+    setStatusText("Thinking…");
     try {
-      const response = await sendMessage(chatId, text);
+      const response = await sendMessage(chatId, text, setStatusText);
       applyResponse(response);
     } finally {
       setSending(false);
+      setStatusText(null);
     }
   }
 
   async function handleApprove() {
     setSending(true);
+    setStatusText("Thinking…");
     try {
-      applyResponse(await approve(chatId));
+      applyResponse(await approve(chatId, setStatusText));
     } finally {
       setSending(false);
+      setStatusText(null);
     }
   }
 
   async function handleReject() {
     setSending(true);
+    setStatusText("Thinking…");
     try {
-      applyResponse(await reject(chatId));
+      applyResponse(await reject(chatId, setStatusText));
     } finally {
       setSending(false);
+      setStatusText(null);
     }
   }
 
@@ -112,6 +121,20 @@ export function ChatWindow({ chatId, onChatTitled }: Props) {
                 onReject={handleReject}
               />
             ))}
+            {sending && statusText && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <Avatar
+                  icon={<RobotOutlined />}
+                  style={{ backgroundColor: "#f0f0f0", color: "#595959", flexShrink: 0 }}
+                />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }}>
+                  <Spin size="small" />
+                  <Text type="secondary" italic>
+                    {statusText}
+                  </Text>
+                </div>
+              </div>
+            )}
             <div ref={bottomRef} />
           </>
         )}
@@ -134,10 +157,9 @@ export function ChatWindow({ chatId, onChatTitled }: Props) {
           type="primary"
           icon={<SendOutlined />}
           onClick={handleSend}
-          disabled={!!pendingToolCalls}
-          loading={sending}
+          disabled={!!pendingToolCalls || sending}
         >
-          Send
+          {sending ? "Sending…" : "Send"}
         </Button>
       </div>
     </div>
