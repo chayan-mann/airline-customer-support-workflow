@@ -1,10 +1,11 @@
 from dotenv import load_dotenv
+
+load_dotenv()  # must run before any app.* import — several read env vars (e.g. DATABASE_URL) at import time
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, chats, conversation
-
-load_dotenv()
 
 app = FastAPI(title="AI Customer Support Agent")
 
