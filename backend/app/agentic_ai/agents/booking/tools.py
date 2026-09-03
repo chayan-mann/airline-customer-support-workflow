@@ -71,6 +71,41 @@ def find_alternative_flights(
     return f"{header}\n\nOther available flights on this route:\n{lines}"
 
 
+class SearchFlightsInput(BaseModel):
+    origin: str = Field(description="Origin airport code, e.g. DEL")
+    destination: str = Field(description="Destination airport code, e.g. BOM")
+    date: str = Field(description="Travel date in YYYY-MM-DD format, e.g. 2026-08-14")
+
+
+@tool(args_schema=SearchFlightsInput)
+def search_flights(
+    origin: str,
+    destination: str,
+    date: str,
+    user_id: Annotated[str, InjectedState("user_id")],
+) -> str:
+    """Search for flights on a route and date to book a brand-new reservation.
+
+    Call this first when the user wants to book a new flight (not change an
+    existing booking — use find_alternative_flights for that). Each result
+    comes with a token — pass that exact token (not the flight number) to
+    list_available_seats and create_booking.
+    """
+    db = SessionLocal()
+    try:
+        options = booking_service.search_flights(db, uuid.UUID(user_id), origin, destination, date)
+    finally:
+        db.close()
+
+    if not options:
+        return f"No flights found from {origin.strip().upper()} to {destination.strip().upper()} on {date.strip()}."
+
+    lines = "\n".join(
+        f"- [{token}] {f.flight_number} on {f.date} at {f.departure_time}" for token, f in options
+    )
+    return f"Flights from {origin.strip().upper()} to {destination.strip().upper()} on {date.strip()}:\n{lines}"
+
+
 class ListSeatsInput(BaseModel):
     flight_option_token: str = Field(
         description="The token shown next to the chosen flight from find_alternative_flights, e.g. 'opt_a1b2c3d4'"
@@ -82,10 +117,10 @@ def list_available_seats(
     flight_option_token: str,
     user_id: Annotated[str, InjectedState("user_id")],
 ) -> str:
-    """List available seats on a flight the user picked from find_alternative_flights.
+    """List available seats on a flight the user picked from find_alternative_flights or search_flights.
 
-    Takes the option token from that call, not a flight number — call
-    find_alternative_flights first if you don't have one.
+    Takes the option token from either of those calls, not a flight number —
+    call one of them first if you don't have one.
     """
     db = SessionLocal()
     try:
@@ -138,6 +173,43 @@ def move_booking(
     return (
         f"Booking {booking.confirmation_code} has been moved to {new_flight.flight_number} "
         f"on {new_flight.date} at {new_flight.departure_time}, seat {booking.seat}."
+    )
+
+
+class CreateBookingInput(BaseModel):
+    flight_option_token: str = Field(
+        description="The token from search_flights for the chosen flight, e.g. 'opt_a1b2c3d4'"
+    )
+    seat: str = Field(description="The chosen seat, e.g. 14C")
+    passenger_name: str = Field(description="Full name of the passenger for this booking")
+
+
+@tool(args_schema=CreateBookingInput)
+def create_booking(
+    flight_option_token: str,
+    seat: str,
+    passenger_name: str,
+    user_id: Annotated[str, InjectedState("user_id")],
+) -> str:
+    """Create a brand-new booking on a flight the user picked from search_flights.
+
+    Only call this with a flight_option_token from search_flights and a seat
+    the user picked from list_available_seats.
+    """
+    db = SessionLocal()
+    try:
+        booking, flight = booking_service.create_booking(
+            db, uuid.UUID(user_id), flight_option_token, seat, passenger_name
+        )
+    except BookingError as e:
+        return str(e)
+    finally:
+        db.close()
+
+    return (
+        f"Booking confirmed! Confirmation code {booking.confirmation_code}: "
+        f"{booking.passenger_name} on {flight.flight_number} from {flight.origin} "
+        f"to {flight.destination} on {flight.date} at {flight.departure_time}, seat {booking.seat}."
     )
 
 

@@ -23,7 +23,11 @@ class FlightSelectionToken(Base):
     # more likely to get mangled in transit.
     id: Mapped[str] = mapped_column(String(16), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
-    booking_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("bookings.id"), index=True)
+    # Nullable: a token issued while searching for a brand-new booking
+    # (search_flights) has no booking to attach to yet — one doesn't exist
+    # until create_booking makes it. Tokens from find_alternative_flights
+    # (an existing booking's date change) still always set this.
+    booking_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("bookings.id"), index=True, default=None)
     flight_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("flights.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

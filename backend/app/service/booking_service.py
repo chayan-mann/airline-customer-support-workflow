@@ -1,6 +1,7 @@
 import uuid
 import logging
 import secrets
+import string
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.models import Booking, Flight, Seat, FlightSelectionToken
@@ -32,21 +33,34 @@ def _generate_token_id(db: Session) -> str:
             return token_id
     raise RuntimeError("Failed to generate a unique flight selection token after 5 attempts.")
 
+# function to generate a unique booking confirmation code
+def _generate_confirmation_code(db: Session) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    for _ in range(5):
+        code = "".join(secrets.choice(alphabet) for _ in range(6))
+        if db.query(Booking).filter(Booking.confirmation_code == code).first() is None:
+            return code
+    raise RuntimeError("Failed to generate a unique confirmation code after 5 attempts.")
+
 # function to validate a flight selection token
 def _resolve_flight_token(db: Session, user_id: uuid.UUID, token_id: str) -> FlightSelectionToken:
-    """Validate a token without consuming it — safe to check repeatedly (e.g. list_available_seats followed by a retried move_booking)."""
+    """Validate a token without consuming it — safe to check repeatedly (e.g.
+    list_available_seats followed by a retried move_booking/create_booking).
+    Shared by find_alternative_flights/move_booking (booking_id set) and
+    search_flights/create_booking (booking_id None) — messages below are
+    kept flow-neutral for that reason."""
 
     token = db.get(FlightSelectionToken, token_id)
 
     if token is None or token.user_id != user_id:
-        raise BookingError("That flight option is invalid. Call find_alternative_flights again.")
-    
+        raise BookingError("That flight option is invalid. Please search again for available flights.")
+
     if token.consumed_at is not None:
-        raise BookingError("That flight option has already been used. Call find_alternative_flights again for current options.")
-    
+        raise BookingError("That flight option has already been used. Please search again for current options.")
+
     if token.expires_at < datetime.now(timezone.utc):
-        raise BookingError("That flight option has expired. Call find_alternative_flights again for current options.")
-    
+        raise BookingError("That flight option has expired. Please search again for current options.")
+
     return token
 
 
@@ -152,6 +166,41 @@ def list_alternative_flights(
     return booking, current_flight, options
 
 
+def search_flights(
+    db: Session, user_id: uuid.UUID, origin: str, destination: str, date: str
+) -> list[tuple[str, Flight]]:
+    """Flights on a route+date, each paired with a single-use token proving
+    this option was legitimately offered — create_booking requires one of
+    these tokens, never a bare flight_number/date. Tokens issued here have
+    booking_id=None since no booking exists yet (create_booking makes one)."""
+    origin, destination, date = origin.strip().upper(), destination.strip().upper(), date.strip()
+
+    matches = (
+        db.query(Flight)
+        .filter(Flight.origin == origin, Flight.destination == destination, Flight.date == date)
+        .order_by(Flight.departure_time)
+        .all()
+    )
+
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
+    options: list[tuple[str, Flight]] = []
+    for flight in matches:
+        token_id = _generate_token_id(db)
+        db.add(FlightSelectionToken(
+            id=token_id, user_id=user_id, booking_id=None, flight_id=flight.id, expires_at=expires_at,
+        ))
+        options.append((token_id, flight))
+    db.commit()
+    # expire_on_commit expired every matched flight this session touched —
+    # same recurring footgun as list_alternative_flights/move_booking above;
+    # skipping this refresh crashes with DetachedInstanceError once the
+    # caller reads flight.flight_number/.date after closing the session.
+    for _, flight in options:
+        db.refresh(flight)
+
+    return options
+
+
 def list_available_seats(db: Session, flight_id: uuid.UUID) -> list[str]:
     """Seat numbers on this flight not already claimed by any booking."""
     all_seats = {s.seat_number for s in db.query(Seat).filter(Seat.flight_id == flight_id)}
@@ -213,6 +262,43 @@ def move_booking(
     db.refresh(booking)
     db.refresh(new_flight)
     return booking, new_flight
+
+
+def create_booking(
+    db: Session, user_id: uuid.UUID, flight_option_token: str, seat: str, passenger_name: str
+) -> tuple[Booking, Flight]:
+    """Create a brand-new booking on the flight named by a flight-selection
+    token (from search_flights). Unlike move_booking, there's no prior
+    booking to check the token against — a None booking_id token is exactly
+    what search_flights produces."""
+    token = _resolve_flight_token(db, user_id, flight_option_token)
+    flight = db.get(Flight, token.flight_id)
+
+    seat = seat.strip().upper()
+    _validate_seat_available(db, flight.id, seat)
+
+    passenger_name = passenger_name.strip()
+    if not passenger_name:
+        raise BookingError("A passenger name is required to create a booking.")
+
+    booking = Booking(
+        confirmation_code=_generate_confirmation_code(db),
+        passenger_name=passenger_name,
+        seat=seat,
+        status="confirmed",
+        user_id=user_id,
+        flight_id=flight.id,
+    )
+    db.add(booking)
+    token.consumed_at = datetime.now(timezone.utc)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise BookingError(f"Seat {seat!r} was just taken by someone else — please pick another.")
+    db.refresh(booking)
+    db.refresh(flight)
+    return booking, flight
 
 
 def update_seat(
