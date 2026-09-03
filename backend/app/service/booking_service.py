@@ -341,3 +341,14 @@ def cancel_booking(db: Session, user_id: uuid.UUID, booking_id: uuid.UUID) -> tu
 
     db.refresh(flight)
     return code, flight
+
+
+def cancel_booking_by_confirmation_code(
+    db: Session, user_id: uuid.UUID, confirmation_code: str
+) -> tuple[str, Flight]:
+    """Resolve a confirmation code to a booking (ownership-checked) and
+    cancel it — the LLM-facing entry point, since a tool only ever knows a
+    confirmation_code, never a raw booking id (cancel_booking itself keeps
+    booking_id as its signature, matching how it'd be called directly)."""
+    booking, _ = _get_owned_booking(db, user_id, confirmation_code)
+    return cancel_booking(db, user_id, booking.id)

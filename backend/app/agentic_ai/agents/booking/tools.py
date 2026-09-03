@@ -213,6 +213,29 @@ def create_booking(
     )
 
 
+@tool(args_schema=ConfirmationCodeInput)
+def cancel_booking(
+    confirmation_code: str,
+    user_id: Annotated[str, InjectedState("user_id")],
+) -> str:
+    """Cancel an existing booking, freeing its seat. This cannot be undone —
+    make sure the user actually wants to cancel before calling this."""
+    db = SessionLocal()
+    try:
+        code, flight = booking_service.cancel_booking_by_confirmation_code(
+            db, uuid.UUID(user_id), confirmation_code
+        )
+    except BookingError as e:
+        return str(e)
+    finally:
+        db.close()
+
+    return (
+        f"Booking {code} on {flight.flight_number} from {flight.origin} to "
+        f"{flight.destination} on {flight.date} has been cancelled."
+    )
+
+
 class SelectSeatInput(BaseModel):
     confirmation_code: str = Field(description="The booking confirmation code")
     seat: str = Field(description="The desired seat, e.g. 14C")

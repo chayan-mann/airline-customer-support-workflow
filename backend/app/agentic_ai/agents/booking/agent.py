@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.agentic_ai.agents.booking.tools import (
+    cancel_booking,
     create_booking,
     find_alternative_flights,
     list_available_seats,
@@ -23,6 +24,7 @@ TOOLS = [
     select_seat,
     search_flights,
     create_booking,
+    cancel_booking,
 ]
 PROMPT = build_prompt(Path(__file__).parent)
 
