@@ -8,7 +8,8 @@ import uuid
 from typing import Iterator
 
 from fastapi import HTTPException
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.errors import GraphRecursionError
 from sqlalchemy.orm import Session
 
 from app.agentic_ai.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
@@ -17,6 +18,12 @@ from app.agentic_ai.harness.policy import risk_of
 from app.agentic_ai.llm import llm
 from app.models import Chat, User
 from app.schema.conversation import ChatResponse, HistoryMessage, HistoryResponse, PendingToolCall
+
+STEP_LIMIT_REPLY = (
+    "Sorry, I couldn't finish working on that — it took more steps than "
+    "allowed. Could you rephrase or break the request into smaller parts?"
+)
+STEP_LIMIT_TOOL_MESSAGE = "NOT EXECUTED: the run hit its step limit before this call ran."
 
 TITLE_SYSTEM_PROMPT = (
     "Summarize the user's message into a short chat title: 3-6 words, title "
@@ -90,6 +97,10 @@ def _build_response(config: dict) -> ChatResponse:
 def _describe_step(node_name: str, node_output: dict) -> str | None:
     """Turn one LangGraph node's output into a short human status line, so
     the frontend can show live progress instead of one static spinner."""
+    # Pauses for approval arrive as an "__interrupt__" event whose payload is
+    # a tuple, not a node's state update — nothing to describe.
+    if not isinstance(node_output, dict):
+        return None
     messages = node_output.get("messages") or []
     last = messages[-1] if messages else None
     tool_calls = getattr(last, "tool_calls", None) if last else None
@@ -104,6 +115,25 @@ def _describe_step(node_name: str, node_output: dict) -> str | None:
     return None
 
 
+def _end_runaway_turn(config: dict) -> None:
+    """After a GraphRecursionError, close the turn cleanly: answer any tool
+    calls left dangling and append an apology, written as the specialist
+    agent so the graph routes to END instead of resuming the loop (or showing
+    an approval card for a call the model made mid-loop)."""
+    state = graph.get_state(config)
+    messages = state.values.get("messages", [])
+    last = messages[-1] if messages else None
+
+    closing = [
+        ToolMessage(content=STEP_LIMIT_TOOL_MESSAGE, tool_call_id=tc["id"])
+        for tc in (getattr(last, "tool_calls", None) or [])
+    ]
+    closing.append(AIMessage(content=STEP_LIMIT_REPLY))
+    graph.update_state(
+        config, {"messages": closing}, as_node=f"{state.values['intent']}_agent"
+    )
+
+
 def _stream_graph(
     graph_input,
     chat_id: str,
@@ -116,22 +146,28 @@ def _stream_graph(
     send_message/approve/reject used to return directly, plus any
     extra_final_fields merged in — e.g. chat_title).
 
-    The run is traced by the harness; a turn_summary log line is always
-    emitted, including when the run fails or the client disconnects.
+    The run is traced by the harness and capped at RECURSION_LIMIT steps; a
+    turn_summary log line is always emitted, including when the run hits
+    that cap, fails, or the client disconnects.
     """
     config, tracer = run_config(chat_id, str(user.id), kind)
     # Stays "disconnected" only if the client goes away mid-stream
     # (GeneratorExit), which neither branch below catches.
     outcome, error = "disconnected", None
+    hit_step_limit = False
     try:
-        for event in graph.stream(graph_input, config=config, stream_mode="updates"):
-            for node_name, node_output in event.items():
-                text = _describe_step(node_name, node_output)
-                if text:
-                    yield json.dumps({"type": "status", "text": text}) + "\n"
+        try:
+            for event in graph.stream(graph_input, config=config, stream_mode="updates"):
+                for node_name, node_output in event.items():
+                    text = _describe_step(node_name, node_output)
+                    if text:
+                        yield json.dumps({"type": "status", "text": text}) + "\n"
+        except GraphRecursionError:
+            hit_step_limit = True
+            _end_runaway_turn(_thread_config(chat_id))
 
         response = _build_response(_thread_config(chat_id))
-        outcome = response.status
+        outcome = "step_limit" if hit_step_limit else response.status
         payload = {"type": "final", **response.model_dump()}
         if extra_final_fields:
             payload.update(extra_final_fields)
