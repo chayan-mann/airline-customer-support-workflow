@@ -1,11 +1,11 @@
 ## CUSTOMER SUPPORT AGENT
 
-A local, LangGraph-based customer support agent backed by Ollama. It
-answers support questions (shipping, returns, refunds, billing, account,
-cancellations) by retrieving relevant articles from a small FAQ knowledge
-base (RAG), and pauses for human approval before any tool call that
-changes data. An agent harness wraps every run with tracing, error
-handling, and safety limits.
+A local, LangGraph-based customer support agent backed by Ollama, wrapped
+in an [agent harness](#agent-harness) that adds tracing, error handling,
+and safety limits to every run. It answers support questions (shipping,
+returns, refunds, billing, account, cancellations) by retrieving relevant
+articles from a small FAQ knowledge base (RAG), and pauses for human
+approval before any tool call that changes data.
 
 ## Current functionality
 
