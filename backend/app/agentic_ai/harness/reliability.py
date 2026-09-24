@@ -1,6 +1,8 @@
 """Reliability layer: keep one failing tool or LLM call from crashing the
 whole chat turn."""
 
+import httpx
+from langchain_core.runnables import Runnable
 from langgraph.prebuilt.tool_node import ToolInvocationError
 
 TOOL_INTERNAL_ERROR_MESSAGE = (
@@ -8,6 +10,30 @@ TOOL_INTERNAL_ERROR_MESSAGE = (
     "do not guess a result — tell the user something went wrong on our side "
     "and ask them to try again in a moment."
 )
+
+
+LLM_MAX_ATTEMPTS = 3
+
+# Transient failures talking to Ollama: timeouts, dropped connections
+# (ollama raises the builtin ConnectionError when it can't connect at all).
+TRANSIENT_LLM_ERRORS: tuple[type[Exception], ...] = (httpx.TransportError, ConnectionError)
+
+
+def with_llm_retry(
+    runnable: Runnable, extra_retry_on: tuple[type[Exception], ...] = ()
+) -> Runnable:
+    """Retry an LLM call on transient errors with jittered exponential
+    backoff. Apply it to the final runnable (after bind_tools /
+    with_structured_output), since the retry wrapper doesn't expose those.
+
+    Safe for LLM calls only — they have no side effects. Never wrap tools.
+    Each failed attempt still shows up as an llm_error event in the trace.
+    """
+    return runnable.with_retry(
+        retry_if_exception_type=TRANSIENT_LLM_ERRORS + extra_retry_on,
+        wait_exponential_jitter=True,
+        stop_after_attempt=LLM_MAX_ATTEMPTS,
+    )
 
 
 def handle_tool_error(e: Exception) -> str:

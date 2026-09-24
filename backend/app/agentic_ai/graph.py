@@ -7,7 +7,8 @@ from typing import Annotated, Literal
 
 from dotenv import load_dotenv
 from typing_extensions import TypedDict
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from langchain_core.exceptions import OutputParserException
 from langgraph.prebuilt import ToolNode
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
@@ -16,7 +17,7 @@ from psycopg_pool import ConnectionPool
 
 from app.agentic_ai.agents import SPECIALIST_AGENTS, escalation
 from app.agentic_ai.harness.policy import needs_approval, unclassified_tools
-from app.agentic_ai.harness.reliability import handle_tool_error
+from app.agentic_ai.harness.reliability import handle_tool_error, with_llm_retry
 from app.agentic_ai.llm import llm
 
 load_dotenv()
@@ -51,7 +52,12 @@ class IntentClassification(BaseModel):
 
 
 def classify_intent(state: State) -> State:
-    classifier = llm.with_structured_output(IntentClassification)
+    # Also retry malformed structured output — a fresh sample from a small
+    # local model often parses fine — before falling back to "general".
+    classifier = with_llm_retry(
+        llm.with_structured_output(IntentClassification),
+        extra_retry_on=(OutputParserException, ValidationError),
+    )
     messages = [
         {"role": "system", "content": INTENT_CLASSIFIER_PROMPT},
         *state["messages"],
