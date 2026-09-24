@@ -12,6 +12,7 @@ from langchain_core.messages import ToolMessage
 from sqlalchemy.orm import Session
 
 from app.agentic_ai.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
+from app.agentic_ai.harness import run_config
 from app.agentic_ai.llm import llm
 from app.models import Chat, User
 from app.schema.conversation import ChatResponse, HistoryMessage, HistoryResponse, PendingToolCall
@@ -99,24 +100,42 @@ def _describe_step(node_name: str, node_output: dict) -> str | None:
 
 
 def _stream_graph(
-    graph_input, config: dict, extra_final_fields: dict | None = None
+    graph_input,
+    chat_id: str,
+    user: User,
+    kind: str,
+    extra_final_fields: dict | None = None,
 ) -> Iterator[str]:
     """Run the graph, yielding one NDJSON line per step as a live status
     update, then a final line shaped like ChatResponse (the same payload
     send_message/approve/reject used to return directly, plus any
     extra_final_fields merged in — e.g. chat_title).
-    """
-    for event in graph.stream(graph_input, config=config, stream_mode="updates"):
-        for node_name, node_output in event.items():
-            text = _describe_step(node_name, node_output)
-            if text:
-                yield json.dumps({"type": "status", "text": text}) + "\n"
 
-    response = _build_response(config)
-    payload = {"type": "final", **response.model_dump()}
-    if extra_final_fields:
-        payload.update(extra_final_fields)
-    yield json.dumps(payload) + "\n"
+    The run is traced by the harness; a turn_summary log line is always
+    emitted, including when the run fails or the client disconnects.
+    """
+    config, tracer = run_config(chat_id, str(user.id), kind)
+    # Stays "disconnected" only if the client goes away mid-stream
+    # (GeneratorExit), which neither branch below catches.
+    outcome, error = "disconnected", None
+    try:
+        for event in graph.stream(graph_input, config=config, stream_mode="updates"):
+            for node_name, node_output in event.items():
+                text = _describe_step(node_name, node_output)
+                if text:
+                    yield json.dumps({"type": "status", "text": text}) + "\n"
+
+        response = _build_response(_thread_config(chat_id))
+        outcome = response.status
+        payload = {"type": "final", **response.model_dump()}
+        if extra_final_fields:
+            payload.update(extra_final_fields)
+        yield json.dumps(payload) + "\n"
+    except Exception as e:
+        outcome, error = "error", e
+        raise
+    finally:
+        tracer.finish(outcome, error=error)
 
 
 def get_history(chat_id: str, user: User, db: Session) -> HistoryResponse:
@@ -185,7 +204,9 @@ def send_message(chat_id: str, message: str, user: User, db: Session) -> Iterato
         "messages": [{"role": "user", "content": message}],
         "user_id": str(user.id)
         },
-        config,
+        chat_id,
+        user,
+        "message",
         extra_final_fields={"chat_title": new_title},
     )
 
@@ -199,7 +220,7 @@ def approve_pending_tool(chat_id: str, user: User, db: Session) -> Iterator[str]
         raise HTTPException(status_code=400, detail="No pending tool call for this chat")
 
     # Resuming with None re-enters at the interrupted "*_tools" node and runs it for real.
-    return _stream_graph(None, config)
+    return _stream_graph(None, chat_id, user, "approve")
 
 
 def reject_pending_tool(chat_id: str, user: User, db: Session) -> Iterator[str]:
@@ -220,4 +241,4 @@ def reject_pending_tool(chat_id: str, user: User, db: Session) -> Iterator[str]:
     graph.update_state(
         config, {"messages": rejection_messages}, as_node=_pending_tool_node(config)
     )
-    return _stream_graph(None, config)
+    return _stream_graph(None, chat_id, user, "reject")
