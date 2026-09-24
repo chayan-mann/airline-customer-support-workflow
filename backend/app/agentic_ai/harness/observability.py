@@ -8,6 +8,7 @@ call, so agents and tools don't need to know this exists.
 
 import json
 import logging
+import os
 import sys
 import time
 import uuid
@@ -17,7 +18,11 @@ from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-LOG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "logs"
+# HARNESS_LOG_DIR overrides the location (the test suite points it at a
+# temp dir so test runs never write to the real log).
+LOG_DIR = Path(
+    os.getenv("HARNESS_LOG_DIR") or Path(__file__).resolve().parent.parent.parent.parent / "logs"
+)
 LOG_FILE = LOG_DIR / "harness.jsonl"
 
 logger = logging.getLogger("harness")

@@ -3,6 +3,7 @@ whole chat turn."""
 
 import httpx
 from langchain_core.runnables import Runnable
+from langchain_core.runnables.retry import ExponentialJitterParams
 from langgraph.prebuilt.tool_node import ToolInvocationError
 
 TOOL_INTERNAL_ERROR_MESSAGE = (
@@ -13,6 +14,8 @@ TOOL_INTERNAL_ERROR_MESSAGE = (
 
 
 LLM_MAX_ATTEMPTS = 3
+# Wait ~1s, ~2s, … (+ up to 1s jitter) between attempts, capped at 10s.
+LLM_BACKOFF: ExponentialJitterParams = {"initial": 1, "max": 10, "jitter": 1}
 
 # Transient failures talking to Ollama: timeouts, dropped connections
 # (ollama raises the builtin ConnectionError when it can't connect at all).
@@ -32,6 +35,7 @@ def with_llm_retry(
     return runnable.with_retry(
         retry_if_exception_type=TRANSIENT_LLM_ERRORS + extra_retry_on,
         wait_exponential_jitter=True,
+        exponential_jitter_params=LLM_BACKOFF,
         stop_after_attempt=LLM_MAX_ATTEMPTS,
     )
 

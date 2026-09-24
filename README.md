@@ -156,3 +156,31 @@ Tool args and results are logged (truncated to 200 characters), so the
 log contains personal data such as passenger names — mask it before
 shipping logs anywhere shared.
 
+
+## Tests
+
+```bash
+cd backend
+venv/bin/pip install -r requirements-dev.txt
+venv/bin/pytest
+```
+
+The suite (`backend/tests/`) runs the real graph and harness in about a
+second with Postgres, the FAQ embeddings, and Ollama replaced by in-memory
+fakes, and scripted model replies. It covers the approval flow (read vs.
+write routing, approve, reject), the step limit, tool error handling, LLM
+retries and the classifier fallback, and the tracer's events. A tool added
+to an agent without a `TOOL_RISK` entry fails the suite.
+
+### Classifier eval (real model)
+
+`backend/evals/classifier_eval.py` runs 32 labelled messages
+(`classifier_cases.jsonl`) through the production intent classifier
+against your local Ollama and reports accuracy per intent. It needs Ollama,
+not Postgres, and exits non-zero below `--min-accuracy` (default 85%), so
+use it to check prompt or model changes:
+
+```bash
+cd backend
+venv/bin/python -m evals.classifier_eval
+```

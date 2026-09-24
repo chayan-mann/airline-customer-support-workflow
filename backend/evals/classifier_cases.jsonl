@@ -1,0 +1,32 @@
+{"message": "I want to book a flight from Delhi to Mumbai next Friday", "intent": "booking"}
+{"message": "Can I change my flight ABC123 to a later date?", "intent": "booking"}
+{"message": "Please move me to a window seat on my booking", "intent": "booking"}
+{"message": "How do I check in online for tomorrow's flight?", "intent": "booking"}
+{"message": "Show me all my upcoming bookings", "intent": "booking"}
+{"message": "Are there any seats left on the 6pm flight to Bangalore?", "intent": "booking"}
+{"message": "I'd like to cancel my reservation XYZ789", "intent": "booking"}
+{"message": "My suitcase didn't arrive at the carousel in Chennai", "intent": "baggage"}
+{"message": "How many kilos of checked luggage am I allowed?", "intent": "baggage"}
+{"message": "My bag came back with a broken wheel, I want to file a claim", "intent": "baggage"}
+{"message": "Can I bring my cat in the cabin?", "intent": "baggage"}
+{"message": "What's the status of my baggage claim BC-1042?", "intent": "baggage"}
+{"message": "Where is my bag right now? Tag number 0098123456", "intent": "baggage"}
+{"message": "I was charged twice for the same ticket", "intent": "billing"}
+{"message": "When will I get my refund?", "intent": "billing"}
+{"message": "My flight was cancelled by the airline, am I entitled to compensation?", "intent": "billing"}
+{"message": "My payment failed but the money left my account", "intent": "billing"}
+{"message": "The flight was delayed 5 hours, what do I get?", "intent": "billing"}
+{"message": "Can I get an invoice for my company?", "intent": "billing"}
+{"message": "Do I need a visa to fly to Singapore?", "intent": "general"}
+{"message": "How do I earn frequent flyer miles?", "intent": "general"}
+{"message": "Is there wifi on board?", "intent": "general"}
+{"message": "What's your customer service phone number?", "intent": "general"}
+{"message": "hi there", "intent": "general"}
+{"message": "thanks, that's all!", "intent": "general"}
+{"message": "Do you serve vegetarian meals on international flights?", "intent": "general"}
+{"message": "I need wheelchair assistance at the airport", "intent": "escalate"}
+{"message": "My 10 year old will be flying alone, how does that work?", "intent": "escalate"}
+{"message": "I travel with a service dog", "intent": "escalate"}
+{"message": "Let me talk to a real person please", "intent": "escalate"}
+{"message": "This bot is useless, get me a human agent", "intent": "escalate"}
+{"message": "Can my guide dog sit with me during the flight?", "intent": "escalate"}
