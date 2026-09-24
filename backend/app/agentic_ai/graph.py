@@ -1,5 +1,7 @@
 
 
+import json
+import logging
 import os
 from typing import Annotated, Literal
 
@@ -13,9 +15,12 @@ from langgraph.checkpoint.postgres import PostgresSaver
 from psycopg_pool import ConnectionPool
 
 from app.agentic_ai.agents import SPECIALIST_AGENTS, escalation
+from app.agentic_ai.harness.reliability import handle_tool_error
 from app.agentic_ai.llm import llm
 
 load_dotenv()
+
+logger = logging.getLogger("harness")
 
 
 class State(TypedDict):
@@ -50,8 +55,14 @@ def classify_intent(state: State) -> State:
         {"role": "system", "content": INTENT_CLASSIFIER_PROMPT},
         *state["messages"],
     ]
-    result = classifier.invoke(messages)
-    return {"intent": result.intent}
+    try:
+        result = classifier.invoke(messages)
+        return {"intent": result.intent}
+    except Exception as e:
+        # Small local models sometimes return malformed structured output (or
+        # Ollama hiccups); route to the general agent rather than crash the turn.
+        logger.warning(json.dumps({"event": "classifier_fallback", "error": repr(e)[:200]}))
+        return {"intent": "general"}
 
 
 # build the graph
@@ -61,7 +72,9 @@ graph_builder = StateGraph(State)
 graph_builder.add_node("classify_intent", classify_intent)
 for agent in SPECIALIST_AGENTS:
     graph_builder.add_node(f"{agent.NAME}_agent", agent.node)
-    graph_builder.add_node(f"{agent.NAME}_tools", ToolNode(agent.TOOLS))
+    graph_builder.add_node(
+        f"{agent.NAME}_tools", ToolNode(agent.TOOLS, handle_tool_errors=handle_tool_error),
+    )
 graph_builder.add_node("escalation_agent", escalation.node)
 
 # connect the nodes
