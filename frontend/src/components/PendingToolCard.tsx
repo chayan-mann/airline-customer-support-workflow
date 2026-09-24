@@ -12,9 +12,9 @@ interface Props {
   onReject: () => void;
 }
 
-// Tool calls that are irreversible get a plainer, more alarming confirmation
-// instead of the raw function-call text — everything else falls back to the
-// generic rendering below.
+// Some tool calls get a plainer, friendlier description instead of the raw
+// function-call text; everything else falls back to the generic rendering
+// below. Danger styling comes from the backend's risk tier for the tool.
 function describeToolCall(toolCall: PendingToolCall): { content: ReactNode; danger: boolean } {
   if (toolCall.name === "cancel_booking" && typeof toolCall.args.confirmation_code === "string") {
     return {
@@ -24,7 +24,7 @@ function describeToolCall(toolCall: PendingToolCall): { content: ReactNode; dang
           <Text strong>{toolCall.args.confirmation_code}</Text>. This can't be undone.
         </>
       ),
-      danger: true,
+      danger: toolCall.risk === "destructive",
     };
   }
 
@@ -37,7 +37,7 @@ function describeToolCall(toolCall: PendingToolCall): { content: ReactNode; dang
         The agent wants to call: <Text code>{`${toolCall.name}(${argsText})`}</Text>
       </>
     ),
-    danger: false,
+    danger: toolCall.risk === "destructive",
   };
 }
 

@@ -14,6 +14,7 @@ class PendingToolCall(BaseModel):
     id: str
     name: str
     args: dict
+    risk: str  # "read", "write" or "destructive" — see harness/policy.py
 
 
 class ChatResponse(BaseModel):

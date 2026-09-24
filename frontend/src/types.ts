@@ -2,6 +2,7 @@ export interface PendingToolCall {
   id: string;
   name: string;
   args: Record<string, unknown>;
+  risk: "read" | "write" | "destructive";
 }
 
 export interface ChatResponse {

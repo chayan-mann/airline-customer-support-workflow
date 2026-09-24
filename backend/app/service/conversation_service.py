@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.agentic_ai.graph import TOOL_NODE_NAMES, TOOL_REJECTED_MESSAGE, graph
 from app.agentic_ai.harness import run_config
+from app.agentic_ai.harness.policy import risk_of
 from app.agentic_ai.llm import llm
 from app.models import Chat, User
 from app.schema.conversation import ChatResponse, HistoryMessage, HistoryResponse, PendingToolCall
@@ -68,13 +69,17 @@ def _pending_tool_calls(config: dict) -> list[dict]:
     return getattr(last_message, "tool_calls", None) or []
 
 
+def _to_pending_tool_call(tc: dict) -> PendingToolCall:
+    return PendingToolCall(id=tc["id"], name=tc["name"], args=tc["args"], risk=risk_of(tc["name"]).value)
+
+
 def _build_response(config: dict) -> ChatResponse:
     pending = _pending_tool_calls(config)
     if pending:
         return ChatResponse(
             status="pending_approval",
             pending_tool_calls=[
-                PendingToolCall(id=tc["id"], name=tc["name"], args=tc["args"])
+                _to_pending_tool_call(tc)
                 for tc in pending
             ],
         )
@@ -155,7 +160,7 @@ def get_history(chat_id: str, user: User, db: Session) -> HistoryResponse:
 
     pending = _pending_tool_calls(config)
     pending_tool_calls = (
-        [PendingToolCall(id=tc["id"], name=tc["name"], args=tc["args"]) for tc in pending]
+        [_to_pending_tool_call(tc) for tc in pending]
         if pending
         else None
     )
