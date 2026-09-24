@@ -184,3 +184,22 @@ use it to check prompt or model changes:
 cd backend
 venv/bin/python -m evals.classifier_eval
 ```
+
+### Tool-choice eval (real model)
+
+`backend/evals/tool_choice_eval.py` checks that each specialist agent picks
+the right tool with the right arguments, and never takes a forbidden
+shortcut — e.g. calling `move_booking` before the user picked a flight and
+seat, calling `create_booking` without asking for a passenger name, or
+filing a baggage claim without a tag number. Its 22 cases
+(`tool_choice_cases.jsonl`) can start mid-conversation, with earlier tool
+results in the history, to test later steps of a flow. Only the model's
+next step is graded and tools are never executed, so it needs Ollama but
+not Postgres.
+
+```bash
+cd backend
+venv/bin/python -m evals.tool_choice_eval             # all cases
+venv/bin/python -m evals.tool_choice_eval --repeat 3  # spot flaky cases
+venv/bin/python -m evals.tool_choice_eval --only move-step2-uses-picked-token
+```
