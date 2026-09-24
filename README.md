@@ -203,3 +203,33 @@ venv/bin/python -m evals.tool_choice_eval             # all cases
 venv/bin/python -m evals.tool_choice_eval --repeat 3  # spot flaky cases
 venv/bin/python -m evals.tool_choice_eval --only move-step2-uses-picked-token
 ```
+
+### Answer-quality eval (real model + LLM judge)
+
+`backend/evals/answer_quality_eval.py` asks each specialist 19 policy
+questions (`answer_quality_cases.jsonl`), runs the real agent loop with the
+real FAQ search until it replies, then has a judge model grade each reply:
+
+- **correctness** — `correct` / `partial` / `incorrect` against a reference
+  answer written from the FAQ.
+- **grounded** — whether every policy fact in the reply appears in the FAQ
+  text the agent actually retrieved. This catches answers made up from the
+  model's general knowledge, which the prompts forbid.
+
+Three cases ask about things the FAQ doesn't cover (lounges, price
+matching, surfboards); the right answer there is "I don't have that
+information", not an invented policy. The score counts `correct` as 1 and
+`partial` as 0.5, and the run fails below `--min-score` (default 75%).
+
+```bash
+cd backend
+venv/bin/python -m evals.answer_quality_eval
+venv/bin/python -m evals.answer_quality_eval --judge-model qwen3.5:27b
+venv/bin/python -m evals.answer_quality_eval --only change-fee --show-answers
+```
+
+The judge defaults to `EVAL_JUDGE_MODEL`, else `OLLAMA_MODEL`. A judge the
+same size as the model being tested tends to be lenient and noisy, so use a
+larger one if you can, and read the judge's reasons for failures rather
+than trusting the score alone. Needs Ollama (chat and embedding models), not
+Postgres.
