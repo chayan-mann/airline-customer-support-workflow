@@ -17,7 +17,8 @@ approval before any tool call that changes data.
   `OLLAMA_MODEL` / `OLLAMA_EMBED_MODEL` / `OLLAMA_BASE_URL` in `.env`.
 - **Frontend**: React + Vite + antd.
 - **Persistence**: a single Postgres database holds both the app's own
-  tables (users, chats, flights, bookings, seats, flight-selection tokens)
+  tables (users, chats, flights, bookings, seats, flight-selection tokens,
+  checked bags, baggage claims, payments, refunds)
   and LangGraph's own conversation checkpoints — schema is managed
   entirely through Alembic migrations (`backend/alembic/`), no
   `create_all()` anywhere.
@@ -70,8 +71,41 @@ value the model can supply or forge):
 and `check_claim_status`, backed by the checked-bags and baggage-claims
 tables.
 
-`billing` and `general` currently only have `search_faq` — they don't yet
-have their own domain-specific tools.
+### Billing agent
+
+- `list_my_payments` — every payment on the account, including for
+  cancelled bookings, with any refund in progress.
+- `get_invoice` — itemized invoice for one booking (base fare, taxes &
+  fees, total, payment method, fare type).
+- `request_refund` — refund a *cancelled* booking: refundable fares go back
+  to the original payment method, non-refundable fares become travel
+  credit (per the Refunds FAQ). Refuses while the booking is still active,
+  and returns the existing refund instead of creating a duplicate.
+- `check_refund_status` — look up a refund by its number (e.g. `RF4F7K2X`).
+
+Payments outlive their bookings on purpose: `cancel_booking` deletes the
+booking row, so `payments.booking_id` is `SET NULL` on delete (NULL means
+"booking cancelled") and the confirmation code and flight summary are
+snapshotted on the payment. New bookings made through `create_booking`
+don't create a payment yet — there's no payment step in that flow.
+
+`general` currently only has `search_faq` — it doesn't yet have its own
+domain-specific tools.
+
+### Demo data
+
+```bash
+cd backend
+alembic upgrade head
+python -m app.scripts.seed_bookings   # users, flights, seats, bookings
+python -m app.scripts.seed_baggage    # checked bags and baggage claims
+python -m app.scripts.seed_billing    # payments and refunds
+```
+
+`seed_billing` also adds payments for three already-cancelled bookings
+(`CAN111` with a completed refund, `CAN222` non-refundable with no refund
+yet, `CAN444` refundable with no refund yet) and one for the second user
+(`CAN333`, refund processing), so the refund flow can be tried end to end.
 
 ## Agent harness
 
@@ -86,8 +120,8 @@ Every tool is listed in `TOOL_RISK` with one of three tiers:
 
 | Tier | Behavior | Tools |
 |---|---|---|
-| `read` | Runs straight away | `search_faq`, `list_my_bookings`, `search_flights`, `find_alternative_flights`, `list_available_seats`, `list_my_baggage`, `track_bag`, `check_claim_status` |
-| `write` | Pauses for approval | `select_seat`, `move_booking`, `create_booking`, `report_baggage_issue` |
+| `read` | Runs straight away | `search_faq`, `list_my_bookings`, `search_flights`, `find_alternative_flights`, `list_available_seats`, `list_my_baggage`, `track_bag`, `check_claim_status`, `list_my_payments`, `get_invoice`, `check_refund_status` |
+| `write` | Pauses for approval | `select_seat`, `move_booking`, `create_booking`, `report_baggage_issue`, `request_refund` |
 | `destructive` | Pauses for approval, red card in the UI | `cancel_booking` |
 
 Each specialist has two tool nodes: `<agent>_read_tools` (no pause) and
@@ -191,7 +225,7 @@ venv/bin/python -m evals.classifier_eval
 the right tool with the right arguments, and never takes a forbidden
 shortcut — e.g. calling `move_booking` before the user picked a flight and
 seat, calling `create_booking` without asking for a passenger name, or
-filing a baggage claim without a tag number. Its 22 cases
+filing a baggage claim without a tag number. Its 28 cases
 (`tool_choice_cases.jsonl`) can start mid-conversation, with earlier tool
 results in the history, to test later steps of a flow. Only the model's
 next step is graded and tools are never executed, so it needs Ollama but

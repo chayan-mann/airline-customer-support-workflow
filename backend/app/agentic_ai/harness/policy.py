@@ -27,6 +27,11 @@ TOOL_RISK: dict[str, Risk] = {
     "track_bag": Risk.READ,
     "check_claim_status": Risk.READ,
     "report_baggage_issue": Risk.WRITE,
+    # billing
+    "list_my_payments": Risk.READ,
+    "get_invoice": Risk.READ,
+    "check_refund_status": Risk.READ,
+    "request_refund": Risk.WRITE,
 }
 
 

@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from langchain_core.messages import ToolMessage
 
-from app.agentic_ai.agents import baggage, booking
+from app.agentic_ai.agents import baggage, billing, booking
 from app.agentic_ai.graph import TOOL_REJECTED_MESSAGE
 from app.service import booking_service, conversation_service
 from tests.helpers import approve, call, calls, reject, reply, send, state, summaries
@@ -21,6 +21,19 @@ def fake_cancel(monkeypatch):
     cancel = Mock(return_value=("ABC123", flight))
     monkeypatch.setattr(booking_service, "cancel_booking_by_confirmation_code", cancel)
     return cancel
+
+
+def test_billing_lookups_run_without_approval(route_to, script_agent, chat_id, user, monkeypatch):
+    from app.service import billing_service
+
+    monkeypatch.setattr(billing_service, "list_payments_for_user", lambda db, user_id: [])
+    route_to("billing")
+    script_agent(billing, call("list_my_payments"), reply("You have no payments on file."))
+
+    final = send(chat_id, user, "what have I paid?")
+
+    assert final["status"] == "ok"
+    assert state(chat_id).next == ()
 
 
 def test_read_only_tool_runs_without_approval(route_to, script_agent, chat_id, user, harness_events):
@@ -43,6 +56,7 @@ def test_read_only_tool_runs_without_approval(route_to, script_agent, chat_id, u
         (booking, "select_seat", {"confirmation_code": "ABC123", "seat": "4C"}, "write"),
         (booking, "cancel_booking", {"confirmation_code": "ABC123"}, "destructive"),
         (baggage, "report_baggage_issue", {}, "write"),
+        (billing, "request_refund", {"confirmation_code": "CAN111", "reason": "trip cancelled"}, "write"),
         (booking, "made_up_tool", {}, "destructive"),  # deny by default
     ],
 )

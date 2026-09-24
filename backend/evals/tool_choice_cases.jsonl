@@ -20,3 +20,9 @@
 {"id": "chit-chat-no-tool", "agent": "general", "message": "hi, how are you?", "expect": ["none"]}
 {"id": "refund-question-uses-faq", "agent": "billing", "message": "How long do refunds take to process?", "expect": ["search_faq"]}
 {"id": "thanks-no-tool", "agent": "billing", "message": "thanks, that's all!", "expect": ["none"]}
+{"id": "list-payments", "agent": "billing", "message": "What have I paid for so far?", "expect": ["list_my_payments"]}
+{"id": "invoice-for-booking", "agent": "billing", "message": "Can I get an invoice for booking ABC123?", "expect": ["get_invoice"], "args": {"confirmation_code": "ABC123"}}
+{"id": "refund-status-by-number", "agent": "billing", "message": "What's the status of refund RFPROC01?", "expect": ["check_refund_status"], "args": {"refund_number": "RFPROC01"}}
+{"id": "refund-after-confirmation", "agent": "billing", "history": [{"role": "user", "content": "I cancelled booking CAN222 and want my money back"}, {"role": "assistant", "content": "I can request a refund for CAN222. Could you tell me briefly why you're requesting it?"}], "message": "My trip got cancelled because of a family emergency", "expect": ["request_refund"], "args": {"confirmation_code": "CAN222"}}
+{"id": "refund-without-code-does-not-guess", "agent": "billing", "message": "I want a refund", "expect": ["list_my_payments", "none"], "forbid": ["request_refund"]}
+{"id": "refund-policy-uses-faq", "agent": "billing", "message": "Do non-refundable tickets ever get refunded?", "expect": ["search_faq"], "forbid": ["request_refund", "list_my_payments"]}
